@@ -1,0 +1,9 @@
+version: "3"
+services:
+  bigipUcsContainer:
+    stdin_open: true
+    tty: true
+    build:
+      context: .
+    volumes:
+      - .:/ansible

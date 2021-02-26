@@ -1,0 +1,154 @@
+---
+- name: "Using BIG-IQ: Generate backup/ucs of group based on existing schedule; Deploy UCS to BIG-IPs"
+  hosts: all
+  connection: local
+  gather_facts: no
+
+  collections:
+    - f5networks.f5_modules
+
+  vars:
+    user: admin
+    password: <password>
+    existingBackupName: daily-backup2
+    backupDict: {}
+    nameOfDeployment: "ansibleDeploy_{{ansible_date_time.epoch}}"
+    dateTimeDeployment: "{{ lookup('pipe', 'date \"+%Y%m%d%H%M\"') }}"
+   
+
+  # vars_prompt:
+  #   - name: password
+  #     prompt: "Enter Password"
+  #     private: no
+
+  #   - name: existingBackupName
+  #     prompt: "Copy and paste your existing scheduled Backup name here"
+  #     private: no
+    
+
+  tasks:
+  # - name: GET - list of scheduled backups
+  #   uri:
+  #     url: "https://{{inventory_hostname}}/mgmt/shared/task-scheduler/scheduler/"
+  #     method: GET
+  #     user: "{{user}}"
+  #     password: "{{password}}"
+  #     validate_certs: no
+  #   delegate_to: localhost
+  #   register: scheduledBackups
+
+  # - name: Print result of get for scheduled backups
+  #   debug:
+  #     msg: "{{scheduledBackups}}"
+  #     verbosity: 1
+
+  # - name: Set_fact - create dict of scheduled backup values
+  #   set_fact: 
+  #     backupDict: "{{ scheduledBackups | json_query(query_json) }}"
+  #   vars:
+  #     query_json: >
+  #       {"devicesReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.devicesReference, "taskReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskReference, "taskBody": {"namePrefix": '{{nameOfDeployment}}_', "includePrivateKeys": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.includePrivateKeys, "isEncrypted": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.isEncrypted, "backupLifeTime": '1', "shouldCreateArchive": 'false', "name": '{{dateTimeDeployment}}.ucs', "selfLink": json.items[?name=='{{existingBackupName}}'].selfLink, "obfuscatedPassphrase": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.obfuscatedPassphrase}}
+
+  # - name: Print dict of backup values
+  #   debug:
+  #     msg: "{{ backupDict }}"
+  #     #verbosity: 1
+
+  # - name: POST - to initiate backup encrypted
+  #   uri:
+  #     url: "https://{{inventory_hostname}}/mgmt/shared/group-task"
+  #     method: POST
+  #     user: "{{user}}"
+  #     password: "{{password}}"
+  #     validate_certs: no
+  #     status_code: 202
+  #     body: 
+  #       devicesReference: "{{backupDict.devicesReference[0]}}"
+  #       taskReference: "{{backupDict.taskReference[0]}}"
+  #       taskBody:
+  #         namePrefix: "{{backupDict.taskBody.namePrefix}}"
+  #         includePrivateKeys: "{{backupDict.taskBody.includePrivateKeys[0]}}"
+  #         isEncrypted: "{{backupDict.taskBody.isEncrypted[0]}}"
+  #         backupLifeTime: "{{backupDict.taskBody.backupLifeTime}}"
+  #         shouldCreateArchive: "{{backupDict.taskBody.shouldCreateArchive}}"
+  #         name: "{{backupDict.taskBody.name}}"
+  #         selfLink: "{{backupDict.taskBody.selfLink[0]}}"
+  #         obfuscatedPassphrase: "{{backupDict.taskBody.obfuscatedPassphrase[0]}}"
+  #     body_format: json
+  #   delegate_to: localhost
+  #   register: resultInitiateBackup
+  #   when: backupDict.taskBody.obfuscatedPassphrase[0] is defined
+
+  # - name: print results of initiating backup
+  #   debug:  
+  #     msg: "{{ resultInitiateBackup }}"
+  #     #verbosity: 1
+
+  # - name: Set_fact - get task ID
+  #   set_fact: 
+  #     taskID: "{{ resultInitiateBackup | json_query(query_json) }}"
+  #   vars:
+  #     query_json: >
+  #       json.id
+
+  # - name: print results of taskID
+  #   debug:  
+  #     msg: "{{ taskID }}"
+  #     #verbosity: 1
+
+  # - name: GET - to check status of backup, waiting for FINISHED
+  #   uri:
+  #     url: "https://{{inventory_hostname}}/mgmt/shared/group-task/{{taskID}}"
+  #     method: GET
+  #     user: "{{user}}"
+  #     password: "{{password}}"
+  #     validate_certs: no
+  #   delegate_to: localhost
+  #   register: statusOfBackup
+  #   until: statusOfBackup.json.status.find("FINISHED") != -1
+  #   retries: 45
+  #   delay: 20
+
+
+  # - name: print results of status check of backup
+  #   debug:  
+  #     msg: "{{ statusOfBackup }}"
+  #     #verbosity: 1
+
+######  BELOW IS TO RE-DISCOVER THE DEVICES AFTER RE-PAVE #####
+
+  # - name: Collect BIG-IQ information
+  #   bigiq_device_info:
+  #     gather_subset:
+  #       - vlans
+  #     provider:
+  #       user: "{{user}}"
+  #       password: "{{password}}"
+  #       server: "{{inventory_hostname}}"
+  #       validate_certs: no
+  #       #auth_provider: local
+  #   delegate_to: localhost
+
+  # - name: Re-discover device and import config, use default conflict policy.
+  #   bigiq_device_discovery:
+  #     device_address: "10.1.1.8"
+  #     device_username: "{{user}}"
+  #     device_password: "{{password}}"
+  #     modules:
+  #       - ltm
+  #       - apm
+  #       - asm
+  #       - afm
+  #       - dns
+  #       - security_shared
+  #     force: yes
+  #     access_group_name: boston
+  #     access_conflict_policy: use_bigiq
+  #     #access_conflict_policy: use_bigiq
+  #     provider:
+  #       password: "{{password}}"
+  #       server: "{{inventory_hostname}}"
+  #       user: "{{user}}"
+  #       validate_certs: no
+  #       #auth_provider: local
+  #   delegate_to: localhost

@@ -1,0 +1,13 @@
+
+[bigiq_host]
+3194b747-d4cd-4721-aca4-8f9f73b4a3d6.access.udf.f5.com ansible_user=admin
+
+
+[all:vars]
+
+ISO_IMAGE=BIGIP-15.1.2-0.0.9.iso
+ISO_PATH= ../UPGRADES/ISO
+BACKUPS= ../UPGRADES/BACKUPS
+SCRIPTS= ../UPGRADES/SCRIPTS
+TMP= ../UPGRADES/TMP
+UPGRADES= ../UPGRADES
