@@ -1,7 +1,7 @@
 ---
 - name: "Using BIG-IQ: Generate backup/ucs of group based on existing schedule; Deploy UCS to BIG-IPs"
   hosts: all
-  connection: local
+  #connection: local
   gather_facts: no
 
   collections:
@@ -9,10 +9,10 @@
 
   vars:
     user: admin
-    password: <password>
+    password: purple123
     existingBackupName: daily-backup2
     backupDict: {}
-    nameOfDeployment: "ansibleDeploy_{{ansible_date_time.epoch}}"
+    filesToTransfer: []
     dateTimeDeployment: "{{ lookup('pipe', 'date \"+%Y%m%d%H%M\"') }}"
    
 
@@ -27,93 +27,145 @@
     
 
   tasks:
-  # - name: GET - list of scheduled backups
-  #   uri:
-  #     url: "https://{{inventory_hostname}}/mgmt/shared/task-scheduler/scheduler/"
-  #     method: GET
-  #     user: "{{user}}"
-  #     password: "{{password}}"
-  #     validate_certs: no
-  #   delegate_to: localhost
-  #   register: scheduledBackups
+  - name: set name of deployment
+    set_fact:
+      nameOfDeployment: "ansibleDeploy_{{dateTimeDeployment}}"
 
-  # - name: Print result of get for scheduled backups
-  #   debug:
-  #     msg: "{{scheduledBackups}}"
-  #     verbosity: 1
+  - name: GET - list of scheduled backups
+    uri:
+      url: "https://{{inventory_hostname}}/mgmt/shared/task-scheduler/scheduler/"
+      method: GET
+      user: "{{user}}"
+      password: "{{password}}"
+      validate_certs: no
+    delegate_to: localhost
+    register: scheduledBackups
 
-  # - name: Set_fact - create dict of scheduled backup values
-  #   set_fact: 
-  #     backupDict: "{{ scheduledBackups | json_query(query_json) }}"
-  #   vars:
-  #     query_json: >
-  #       {"devicesReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.devicesReference, "taskReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskReference, "taskBody": {"namePrefix": '{{nameOfDeployment}}_', "includePrivateKeys": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.includePrivateKeys, "isEncrypted": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.isEncrypted, "backupLifeTime": '1', "shouldCreateArchive": 'false', "name": '{{dateTimeDeployment}}.ucs', "selfLink": json.items[?name=='{{existingBackupName}}'].selfLink, "obfuscatedPassphrase": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.obfuscatedPassphrase}}
+  - name: Print result of get for scheduled backups
+    debug:
+      msg: "{{scheduledBackups}}"
+      verbosity: 1
 
-  # - name: Print dict of backup values
-  #   debug:
-  #     msg: "{{ backupDict }}"
-  #     #verbosity: 1
+  - name: Set_fact - create dict of scheduled backup values
+    set_fact: 
+      backupDict: "{{ scheduledBackups | json_query(query_json) }}"
+    vars:
+      query_json: >
+        {"devicesReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.devicesReference, "taskReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskReference, "taskBody": {"namePrefix": '{{nameOfDeployment}}_', "includePrivateKeys": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.includePrivateKeys, "isEncrypted": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.isEncrypted, "backupLifeTime": '1', "shouldCreateArchive": 'false', "name": '{{dateTimeDeployment}}.ucs', "selfLink": json.items[?name=='{{existingBackupName}}'].selfLink, "obfuscatedPassphrase": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.obfuscatedPassphrase}}
 
-  # - name: POST - to initiate backup encrypted
-  #   uri:
-  #     url: "https://{{inventory_hostname}}/mgmt/shared/group-task"
-  #     method: POST
-  #     user: "{{user}}"
-  #     password: "{{password}}"
-  #     validate_certs: no
-  #     status_code: 202
-  #     body: 
-  #       devicesReference: "{{backupDict.devicesReference[0]}}"
-  #       taskReference: "{{backupDict.taskReference[0]}}"
-  #       taskBody:
-  #         namePrefix: "{{backupDict.taskBody.namePrefix}}"
-  #         includePrivateKeys: "{{backupDict.taskBody.includePrivateKeys[0]}}"
-  #         isEncrypted: "{{backupDict.taskBody.isEncrypted[0]}}"
-  #         backupLifeTime: "{{backupDict.taskBody.backupLifeTime}}"
-  #         shouldCreateArchive: "{{backupDict.taskBody.shouldCreateArchive}}"
-  #         name: "{{backupDict.taskBody.name}}"
-  #         selfLink: "{{backupDict.taskBody.selfLink[0]}}"
-  #         obfuscatedPassphrase: "{{backupDict.taskBody.obfuscatedPassphrase[0]}}"
-  #     body_format: json
-  #   delegate_to: localhost
-  #   register: resultInitiateBackup
-  #   when: backupDict.taskBody.obfuscatedPassphrase[0] is defined
+  - name: Print dict of backup values
+    debug:
+      msg: "{{ backupDict }}"
+      #verbosity: 1
 
-  # - name: print results of initiating backup
-  #   debug:  
-  #     msg: "{{ resultInitiateBackup }}"
-  #     #verbosity: 1
+  - name: POST - to initiate backup encrypted
+    uri:
+      url: "https://{{inventory_hostname}}/mgmt/shared/group-task"
+      method: POST
+      user: "{{user}}"
+      password: "{{password}}"
+      validate_certs: no
+      status_code: 202
+      body: 
+        devicesReference: "{{backupDict.devicesReference[0]}}"
+        taskReference: "{{backupDict.taskReference[0]}}"
+        taskBody:
+          namePrefix: "{{backupDict.taskBody.namePrefix}}"
+          includePrivateKeys: "{{backupDict.taskBody.includePrivateKeys[0]}}"
+          isEncrypted: "{{backupDict.taskBody.isEncrypted[0]}}"
+          backupLifeTime: "{{backupDict.taskBody.backupLifeTime}}"
+          shouldCreateArchive: "{{backupDict.taskBody.shouldCreateArchive}}"
+          name: "{{backupDict.taskBody.name}}"
+          selfLink: "{{backupDict.taskBody.selfLink[0]}}"
+          obfuscatedPassphrase: "{{backupDict.taskBody.obfuscatedPassphrase[0]}}"
+      body_format: json
+    delegate_to: localhost
+    register: resultInitiateBackup
+    when: backupDict.taskBody.obfuscatedPassphrase[0] is defined
 
-  # - name: Set_fact - get task ID
-  #   set_fact: 
-  #     taskID: "{{ resultInitiateBackup | json_query(query_json) }}"
-  #   vars:
-  #     query_json: >
-  #       json.id
+  - name: print results of initiating backup
+    debug:  
+      msg: "{{ resultInitiateBackup }}"
+      #verbosity: 1
 
-  # - name: print results of taskID
-  #   debug:  
-  #     msg: "{{ taskID }}"
-  #     #verbosity: 1
+  - name: Set_fact - get task ID
+    set_fact: 
+      taskID: "{{ resultInitiateBackup | json_query(query_json) }}"
+    vars:
+      query_json: >
+        json.id
 
-  # - name: GET - to check status of backup, waiting for FINISHED
-  #   uri:
-  #     url: "https://{{inventory_hostname}}/mgmt/shared/group-task/{{taskID}}"
-  #     method: GET
-  #     user: "{{user}}"
-  #     password: "{{password}}"
-  #     validate_certs: no
-  #   delegate_to: localhost
-  #   register: statusOfBackup
-  #   until: statusOfBackup.json.status.find("FINISHED") != -1
-  #   retries: 45
-  #   delay: 20
+  - name: print results of taskID
+    debug:  
+      msg: "{{ taskID }}"
+      #verbosity: 1
 
+  - name: GET - to check status of backup, waiting for FINISHED
+    uri:
+      url: "https://{{inventory_hostname}}/mgmt/shared/group-task/{{taskID}}"
+      method: GET
+      user: "{{user}}"
+      password: "{{password}}"
+      validate_certs: no
+    delegate_to: localhost
+    register: statusOfBackup
+    until: statusOfBackup.json.status.find("FINISHED") != -1
+    retries: 45
+    delay: 20
 
-  # - name: print results of status check of backup
-  #   debug:  
-  #     msg: "{{ statusOfBackup }}"
-  #     #verbosity: 1
+  - name: print results of status check of backup
+    debug:  
+      msg: "{{ statusOfBackup }}"
+      #verbosity: 1
+
+  - name: pause
+    pause:
+      seconds: 5
+
+######  BELOW IS TO DOWNLOAD RECENTLY CREATED UCS #####
+
+  - name: find ucs files that were created
+    find:
+      paths: /shared/ucs_backups/
+      patterns: '{{ nameOfDeployment }}.*'
+      use_regex: yes
+    register: findFiles
+  
+  - name: print findFiles
+    debug:
+      msg: "{{findFiles}}"
+      verbosity: 1
+
+  - name: set file names to transfer
+    set_fact:
+      findFiles: "{{ findFiles | json_query(query_json) }}"
+    vars:
+      query_json: >
+        files[].path
+  
+  - name: print findFiles
+    debug:
+      msg: "{{findFiles}}"
+
+  - name: filter path to get name of file 
+    set_fact:
+      filesToTransfer: "{{ filesToTransfer + [item | basename] }}"
+    with_items: "{{ findFiles }}"
+  
+  - name: print filesToTransfer
+    debug:
+      msg: "{{filesToTransfer}}"
+      verbosity: 1
+  
+  - name: Get the ucs files that were just created
+    fetch:
+      src: /shared/ucs_backups/{{item}}
+      dest: ../ucs/
+      flat: yes
+    with_items: "{{ filesToTransfer }}"
+
+######  BELOW IS TO UPLOAD UCS TO FACTORY #####
+
 
 ######  BELOW IS TO RE-DISCOVER THE DEVICES AFTER RE-PAVE #####
 
@@ -152,3 +204,5 @@
   #       validate_certs: no
   #       #auth_provider: local
   #   delegate_to: localhost
+
+

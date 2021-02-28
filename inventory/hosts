@@ -1,6 +1,6 @@
 
 [bigiq_host]
-3194b747-d4cd-4721-aca4-8f9f73b4a3d6.access.udf.f5.com ansible_user=admin
+10.1.1.4 ansible_user=admin ansible_ssh_password=purple123
 
 
 [all:vars]
