@@ -13,7 +13,7 @@
     existingBackupName: daily-backup2
     backupDict: {}
     filesToTransfer: []
-    dateTimeDeployment: "{{ lookup('pipe', 'date \"+%Y%m%d%H%M\"') }}"
+    #dateTimeDeployment: "{{ lookup('pipe', 'date \"+%Y%m%d%H%M\"') }}"
    
 
   # vars_prompt:
@@ -30,13 +30,25 @@
   #     private: no
 
   tasks:
-  - name: set day_time of deployment
-    set_fact:
-      day_time: "{{ lookup('pipe', 'date \"+%Y%m%d%H%M\"') }}"
+  # - name: set day_time of deployment
+  #   set_fact:
+  #     day_time2: "{{ dateTimeDeployment }}"
+  
+  - name: Get timestamp from the system
+    shell: "date +%Y%m%d%H%M"
+    register: day_time
+
+  - name: set day & time var
+    set_fact: 
+      day_time: "{{day_time.stdout}}"
+
+  - name: print day & time var
+    debug:
+      msg: "{{day_time}}"
 
   - name: set name of deployment
     set_fact:
-      nameOfDeployment: "ansibleDeploy"
+      nameOfDeployment: "ansibleDeploy_{{day_time}}"
       
   - name: GET - list of scheduled backups
     uri:
@@ -58,7 +70,7 @@
       backupDict: "{{ scheduledBackups | json_query(query_json) }}"
     vars:
       query_json: >
-        {"devicesReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.devicesReference, "taskReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskReference, "taskBody": {"namePrefix": '{{nameOfDeployment}}_', "includePrivateKeys": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.includePrivateKeys, "isEncrypted": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.isEncrypted, "backupLifeTime": '1', "shouldCreateArchive": 'false', "name": '{{day_time}}.ucs', "selfLink": json.items[?name=='{{existingBackupName}}'].selfLink, "obfuscatedPassphrase": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.obfuscatedPassphrase}}
+        {"devicesReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.devicesReference, "taskReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskReference, "taskBody": {"namePrefix": '{{nameOfDeployment}}_', "includePrivateKeys": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.includePrivateKeys, "isEncrypted": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.isEncrypted, "backupLifeTime": '1', "shouldCreateArchive": 'false', "name": '{{nameOfDeployment}}.ucs', "selfLink": json.items[?name=='{{existingBackupName}}'].selfLink, "obfuscatedPassphrase": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.obfuscatedPassphrase}}
 
   - name: Print dict of backup values
     debug:
@@ -127,10 +139,11 @@
 
 ######  BELOW IS TO DOWNLOAD RECENTLY CREATED UCS #####
 
+
   - name: find ucs files that were created
     find:
       paths: /shared/ucs_backups/
-      patterns: '{{ nameOfDeployment }}.*'
+      patterns: '{{nameOfDeployment}}.*'
       use_regex: yes
     register: findFiles
   
@@ -175,7 +188,7 @@
 
   - name: Upload UCS
     bigip_ucs:
-      ucs: ../ucs/{{item}}
+      ucs: ../ucs/{{nameOfDeployment}}_BOS-vBIGIP01.termmarc.com_{{nameOfDeployment}}.ucs
       state: installed
       passphrase: "{{password}}"
       provider:
@@ -184,8 +197,6 @@
         password: "{{password}}"
         validate_certs: no
     delegate_to: localhost
-    with_items: "{{filesToTransfer}}"
-
 
 ######  BELOW IS TO RE-DISCOVER THE DEVICES AFTER RE-PAVE #####
 
