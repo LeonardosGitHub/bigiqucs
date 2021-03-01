@@ -24,7 +24,10 @@
   #   - name: existingBackupName
   #     prompt: "Copy and paste your existing scheduled Backup name here"
   #     private: no
-    
+
+  #   - name: bigipIP
+  #     prompt: "Input IP of BIGIP"
+  #     private: no
 
   tasks:
   - name: set name of deployment
@@ -118,10 +121,6 @@
       msg: "{{ statusOfBackup }}"
       #verbosity: 1
 
-  - name: pause
-    pause:
-      seconds: 5
-
 ######  BELOW IS TO DOWNLOAD RECENTLY CREATED UCS #####
 
   - name: find ucs files that were created
@@ -165,6 +164,23 @@
     with_items: "{{ filesToTransfer }}"
 
 ######  BELOW IS TO UPLOAD UCS TO FACTORY #####
+
+  - name: set BIG-IP that has been set to factory
+    set_fact:
+      bigipIP: 10.1.1.8
+
+  - name: Upload UCS
+    bigip_ucs:
+      ucs: ../ucs/{{item}}
+      state: installed
+      passphrase: "{{password}}"
+      provider:
+        server: "{{ bigipIP }}"
+        user: "{{user}}"
+        password: "{{password}}"
+        validate_certs: no
+    delegate_to: localhost
+    with_items: "{{filesToTransfer}}"
 
 
 ######  BELOW IS TO RE-DISCOVER THE DEVICES AFTER RE-PAVE #####
