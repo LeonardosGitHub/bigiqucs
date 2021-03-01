@@ -180,11 +180,34 @@
       flat: yes
     with_items: "{{ filesToTransfer }}"
 
+- name: Do you want to continue
+  debug:
+    msg: "The playbook will pause while a re-pave effort is completed. Please follow the PAUSE instructions"
+  tags:
+    - always
+
+- name: pause for 7200 seconds
+  pause:
+    seconds: 7200
+  tags:
+    - always
+
+
 ######  BELOW IS TO UPLOAD UCS TO FACTORY #####
 
   - name: set BIG-IP that has been set to factory
     set_fact:
       bigipIP: 10.1.1.8
+
+  - name: Set the hostname of the BIG-IP
+    bigip_hostname:
+      hostname: BOS-vBIGIP01.termmarc.com
+      provider:
+        server: "{{ bigipIP }}"
+        user: "{{user}}"
+        password: "{{password}}"
+        validate_certs: no
+    delegate_to: localhost
 
   - name: Upload UCS
     bigip_ucs:
