@@ -30,10 +30,14 @@
   #     private: no
 
   tasks:
+  - name: set day_time of deployment
+    set_fact:
+      day_time: "{{ lookup('pipe', 'date \"+%Y%m%d%H%M\"') }}"
+
   - name: set name of deployment
     set_fact:
-      nameOfDeployment: "ansibleDeploy_{{dateTimeDeployment}}"
-
+      nameOfDeployment: "ansibleDeploy"
+      
   - name: GET - list of scheduled backups
     uri:
       url: "https://{{inventory_hostname}}/mgmt/shared/task-scheduler/scheduler/"
@@ -54,7 +58,7 @@
       backupDict: "{{ scheduledBackups | json_query(query_json) }}"
     vars:
       query_json: >
-        {"devicesReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.devicesReference, "taskReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskReference, "taskBody": {"namePrefix": '{{nameOfDeployment}}_', "includePrivateKeys": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.includePrivateKeys, "isEncrypted": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.isEncrypted, "backupLifeTime": '1', "shouldCreateArchive": 'false', "name": '{{dateTimeDeployment}}.ucs', "selfLink": json.items[?name=='{{existingBackupName}}'].selfLink, "obfuscatedPassphrase": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.obfuscatedPassphrase}}
+        {"devicesReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.devicesReference, "taskReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskReference, "taskBody": {"namePrefix": '{{nameOfDeployment}}_', "includePrivateKeys": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.includePrivateKeys, "isEncrypted": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.isEncrypted, "backupLifeTime": '1', "shouldCreateArchive": 'false', "name": '{{day_time}}.ucs', "selfLink": json.items[?name=='{{existingBackupName}}'].selfLink, "obfuscatedPassphrase": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.obfuscatedPassphrase}}
 
   - name: Print dict of backup values
     debug:
