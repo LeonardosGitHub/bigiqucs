@@ -12,6 +12,7 @@
     password: purple123
     existingBackupName: daily-backup2
     backupDict: {}
+    targetDevices: {}
     filesToTransfer: []
     #dateTimeDeployment: "{{ lookup('pipe', 'date \"+%Y%m%d%H%M\"') }}"
    
@@ -30,10 +31,12 @@
   #     private: no
 
   tasks:
-  # - name: set day_time of deployment
-  #   set_fact:
-  #     day_time2: "{{ dateTimeDeployment }}"
-  
+
+  - name: print
+    debug:
+      msg: "{{item}}"
+    loop: "{{ lookup('fileglob', '../ucs/*', wantlist=True) }}"
+
   - name: Get timestamp from the system
     shell: "date +%Y%m%d%H%M"
     register: day_time
@@ -76,6 +79,46 @@
     debug:
       msg: "{{ backupDict }}"
       #verbosity: 1
+  
+  - name: Get URL for devicesLink
+    set_fact:
+      devicesLink: "{{ backupDict.devicesReference[0].link | urlsplit('path') }}"
+      #verbosity: 1
+
+  - name: GET - list of devices for backup to create dictionary
+    uri:
+      url: "https://{{inventory_hostname}}{{devicesLink}}"
+      method: GET
+      user: "{{user}}"
+      password: "{{password}}"
+      validate_certs: no
+    delegate_to: localhost
+    register: devicesToBeBackedup
+
+  - name: Print results of device targets
+    debug:
+      msg: "{{ devicesToBeBackedup }}"
+      #verbosity: 1
+
+  - name: Set_fact - set variable to number of devices
+    set_fact:
+      numOfDevices: "{{ devicesToBeBackedup | json_query('json.items[] | length(@)') }}"
+
+  - name: Set_fact - create dict of devices to be updated
+    set_fact: 
+      targetDevices: "{{  targetDevices | combine({item: devicesToBeBackedup | json_query(query_json)}) }}"
+      #childPoliciesDict: "{{  childPoliciesDict | combine({item: childPolicies | json_query(query_json)}) }}"
+    vars:
+      query_json: >
+        {"device": json.items[{{item}}].hostname, "address": json.items[{{item}}].address, "machineId": json.items[{{item}}].machineId}
+    loop: "{{ range(0, (numOfDevices | int)) |list }}"
+
+  - name: Print results of device dictionary
+    debug:
+      msg: "{{ targetDevices }}"
+      #verbosity: 1
+
+######  Initiating UCS backup now ######
 
   - name: POST - to initiate backup encrypted
     uri:
@@ -139,7 +182,6 @@
 
 ######  BELOW IS TO DOWNLOAD RECENTLY CREATED UCS #####
 
-
   - name: find ucs files that were created
     find:
       paths: /shared/ucs_backups/
@@ -180,47 +222,95 @@
       flat: yes
     with_items: "{{ filesToTransfer }}"
 
-- name: Do you want to continue
-  debug:
-    msg: "The playbook will pause while a re-pave effort is completed. Please follow the PAUSE instructions"
-  tags:
-    - always
+  # - name: Set_fact - add device specific file to dictionary
+  #   set_fact: 
+  #     targetDevices: "{{  targetDevices[item] | combine({"file": devicesToBeBackedup | json_query(query_json)}) }}"
+  #     #childPoliciesDict: "{{  childPoliciesDict | combine({item: childPolicies | json_query(query_json)}) }}"
+  #   vars:
+  #     query_json: >
+  #       {"device": json.items[{{item}}].hostname, "address": json.items[{{item}}].address, "machineId": json.items[{{item}}].machineId}
+  #   loop: "{{ range(0, (numOfDevices | int)) |list }}"
 
-- name: pause for 7200 seconds
-  pause:
-    seconds: 7200
-  tags:
-    - always
+######  PAUSE TO ALLOW FOR RE-PAVE ACTIVITIES #####
+
+  - name: Do you want to continue
+    debug:
+      msg: "The playbook will pause while a re-pave effort is completed. Please follow the PAUSE instructions. -tmsh load sys config default -Reboot -set Password"
+    tags:
+      - always
+
+  - name: pause for 7200 seconds
+    pause:
+      seconds: 7200
+    tags:
+      - always
 
 
-######  BELOW IS TO UPLOAD UCS TO FACTORY #####
-
-  - name: set BIG-IP that has been set to factory
-    set_fact:
-      bigipIP: 10.1.1.8
+#####  BELOW IS TO UPLOAD and install UCS BIG-IPs #####
 
   - name: Set the hostname of the BIG-IP
     bigip_hostname:
-      hostname: BOS-vBIGIP01.termmarc.com
+      hostname: "{{targetDevices[item].device}}"
       provider:
-        server: "{{ bigipIP }}"
+        server: "{{targetDevices[item].address}}"
         user: "{{user}}"
         password: "{{password}}"
         validate_certs: no
     delegate_to: localhost
+    loop: "{{ range(0, (numOfDevices | int)) |list }}"
 
   - name: Upload UCS
     bigip_ucs:
-      ucs: ../ucs/{{nameOfDeployment}}_BOS-vBIGIP01.termmarc.com_{{nameOfDeployment}}.ucs
-      state: installed
+      ucs: ../ucs/ansibleDeploy_202103010845_BOS-vBIGIP02.termmarc.com.*.ucs
+      #state: installed
       passphrase: "{{password}}"
       provider:
-        server: "{{ bigipIP }}"
+        server: "10.1.1.8"
         user: "{{user}}"
         password: "{{password}}"
         validate_certs: no
     delegate_to: localhost
+    ignore_errors: True
 
+  - name: Get status of device in BIG-IQ
+    uri:
+      url: "https://{{inventory_hostname}}/mgmt/shared/resolver/device-groups/cm-bigip-allBigIpDevices/devices/ba7382a4-7564-4647-b65d-17d6f2a73a16/stats"
+      method: GET
+      status_code: 200
+      user: "{{user}}"
+      password: "{{password}}"
+      validate_certs: no
+    delegate_to: localhost
+    register: getStatusOnBigiq
+  
+  - name: print debug
+    debug:
+      msg: "{{getStatusOnBigiq | json_query(query_json) }}"
+    vars:
+      query_json: >
+        json.entries."health.summary".value
+
+
+  # - name: POST - to load UCS
+  #   uri:
+  #     url: "https://{{bigipIP}}/mgmt/tm/sys/ucs"
+  #     method: POST
+  #     body: 
+  #       command: load
+  #       name: ansibleDeploy_202103010922_BOS-vBIGIP01.termmarc.com_ansibleDeploy_202103010922.ucs
+  #     body_format: json
+  #     status_code: 202,200
+  #     user: "{{user}}"
+  #     password: "{{password}}"
+  #     validate_certs: no
+  #     timeout: 120
+  #   delegate_to: localhost
+  #   register: returnOfUcsPost
+
+  # - name: print results of POST of UCS
+  #   debug:
+  #     msg: "{{returnOfUcsPost}}"
+    
 ######  BELOW IS TO RE-DISCOVER THE DEVICES AFTER RE-PAVE #####
 
   # - name: Collect BIG-IQ information
@@ -258,5 +348,3 @@
   #       validate_certs: no
   #       #auth_provider: local
   #   delegate_to: localhost
-
-
