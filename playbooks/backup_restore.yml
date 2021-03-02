@@ -13,6 +13,7 @@
     existingBackupName: daily-backup2
     backupDict: {}
     targetDevices: {}
+    targetDeviceswFile: {}
     filesToTransfer: []
     #dateTimeDeployment: "{{ lookup('pipe', 'date \"+%Y%m%d%H%M\"') }}"
    
@@ -34,7 +35,7 @@
 
   - name: print
     debug:
-      msg: "{{item}}"
+      msg: "{{item | basename}}"
     loop: "{{ lookup('fileglob', '../ucs/*', wantlist=True) }}"
 
   - name: Get timestamp from the system
@@ -110,7 +111,7 @@
       #childPoliciesDict: "{{  childPoliciesDict | combine({item: childPolicies | json_query(query_json)}) }}"
     vars:
       query_json: >
-        {"device": json.items[{{item}}].hostname, "address": json.items[{{item}}].address, "machineId": json.items[{{item}}].machineId}
+        {"device": json.items[{{item}}].hostname, "address": json.items[{{item}}].address, "machineId": json.items[{{item}}].machineId, "file": ""}
     loop: "{{ range(0, (numOfDevices | int)) |list }}"
 
   - name: Print results of device dictionary
@@ -120,116 +121,135 @@
 
 ######  Initiating UCS backup now ######
 
-  - name: POST - to initiate backup encrypted
-    uri:
-      url: "https://{{inventory_hostname}}/mgmt/shared/group-task"
-      method: POST
-      user: "{{user}}"
-      password: "{{password}}"
-      validate_certs: no
-      status_code: 202
-      body: 
-        devicesReference: "{{backupDict.devicesReference[0]}}"
-        taskReference: "{{backupDict.taskReference[0]}}"
-        taskBody:
-          namePrefix: "{{backupDict.taskBody.namePrefix}}"
-          includePrivateKeys: "{{backupDict.taskBody.includePrivateKeys[0]}}"
-          isEncrypted: "{{backupDict.taskBody.isEncrypted[0]}}"
-          backupLifeTime: "{{backupDict.taskBody.backupLifeTime}}"
-          shouldCreateArchive: "{{backupDict.taskBody.shouldCreateArchive}}"
-          name: "{{backupDict.taskBody.name}}"
-          selfLink: "{{backupDict.taskBody.selfLink[0]}}"
-          obfuscatedPassphrase: "{{backupDict.taskBody.obfuscatedPassphrase[0]}}"
-      body_format: json
-    delegate_to: localhost
-    register: resultInitiateBackup
-    when: backupDict.taskBody.obfuscatedPassphrase[0] is defined
+#   - name: POST - to initiate backup encrypted
+#     uri:
+#       url: "https://{{inventory_hostname}}/mgmt/shared/group-task"
+#       method: POST
+#       user: "{{user}}"
+#       password: "{{password}}"
+#       validate_certs: no
+#       status_code: 202
+#       body: 
+#         devicesReference: "{{backupDict.devicesReference[0]}}"
+#         taskReference: "{{backupDict.taskReference[0]}}"
+#         taskBody:
+#           namePrefix: "{{backupDict.taskBody.namePrefix}}"
+#           includePrivateKeys: "{{backupDict.taskBody.includePrivateKeys[0]}}"
+#           isEncrypted: "{{backupDict.taskBody.isEncrypted[0]}}"
+#           backupLifeTime: "{{backupDict.taskBody.backupLifeTime}}"
+#           shouldCreateArchive: "{{backupDict.taskBody.shouldCreateArchive}}"
+#           name: "{{backupDict.taskBody.name}}"
+#           selfLink: "{{backupDict.taskBody.selfLink[0]}}"
+#           obfuscatedPassphrase: "{{backupDict.taskBody.obfuscatedPassphrase[0]}}"
+#       body_format: json
+#     delegate_to: localhost
+#     register: resultInitiateBackup
+#     when: backupDict.taskBody.obfuscatedPassphrase[0] is defined
 
-  - name: print results of initiating backup
-    debug:  
-      msg: "{{ resultInitiateBackup }}"
-      #verbosity: 1
+#   - name: print results of initiating backup
+#     debug:  
+#       msg: "{{ resultInitiateBackup }}"
+#       #verbosity: 1
 
-  - name: Set_fact - get task ID
+#   - name: Set_fact - get task ID
+#     set_fact: 
+#       taskID: "{{ resultInitiateBackup | json_query(query_json) }}"
+#     vars:
+#       query_json: >
+#         json.id
+
+#   - name: print results of taskID
+#     debug:  
+#       msg: "{{ taskID }}"
+#       #verbosity: 1
+
+#   - name: GET - to check status of backup, waiting for FINISHED
+#     uri:
+#       url: "https://{{inventory_hostname}}/mgmt/shared/group-task/{{taskID}}"
+#       method: GET
+#       user: "{{user}}"
+#       password: "{{password}}"
+#       validate_certs: no
+#     delegate_to: localhost
+#     register: statusOfBackup
+#     until: statusOfBackup.json.status.find("FINISHED") != -1
+#     retries: 45
+#     delay: 20
+
+#   - name: print results of status check of backup
+#     debug:  
+#       msg: "{{ statusOfBackup }}"
+#       #verbosity: 1
+
+# ######  BELOW IS TO DOWNLOAD RECENTLY CREATED UCS #####
+
+#   - name: find ucs files that were created
+#     find:
+#       paths: /shared/ucs_backups/
+#       patterns: '{{nameOfDeployment}}.*'
+#       use_regex: yes
+#     register: findFiles
+  
+#   - name: print findFiles
+#     debug:
+#       msg: "{{findFiles}}"
+#       verbosity: 1
+
+#   - name: set file names to transfer
+#     set_fact:
+#       findFiles: "{{ findFiles | json_query(query_json) }}"
+#     vars:
+#       query_json: >
+#         files[].path
+  
+#   - name: print findFiles
+#     debug:
+#       msg: "{{findFiles}}"
+
+#   - name: filter path to get name of file 
+#     set_fact:
+#       filesToTransfer: "{{ filesToTransfer + [item | basename] }}"
+#     with_items: "{{ findFiles }}"
+  
+#   - name: print filesToTransfer
+#     debug:
+#       msg: "{{filesToTransfer}}"
+#       verbosity: 1
+  
+#   - name: Get the ucs files that were just created
+#     fetch:
+#       src: /shared/ucs_backups/{{item}}
+#       dest: ../ucs/
+#       flat: yes
+#     with_items: "{{ filesToTransfer }}"
+
+  - name: print
+    debug:
+      #msg: "{{ (item|selectattr(item,'contains', '.*BIGIP01.')).master }}"
+      msg: "{{item | basename}}"
+      #msg: "{{ item | select('match', '^(eth|wlan)[0-9]+') | list }}"
+    loop: "{{ lookup('fileglob', '../ucs/*', wantlist=True) }}"
+
+  - name: get files in /ucs
+    set_fact:
+      files: "{{ lookup('fileglob', '../ucs/*', wantlist=True) }}"
+  
+  - name: filter
+    debug:
+      msg: "{{ files | select('match', 'targetDevices.0.device') | list }}"
+
+  - name: Set_fact - add device specific ucs to device dictionary
     set_fact: 
-      taskID: "{{ resultInitiateBackup | json_query(query_json) }}"
-    vars:
-      query_json: >
-        json.id
-
-  - name: print results of taskID
-    debug:  
-      msg: "{{ taskID }}"
+      targetDevices: "{{ targetDevices | combine({item.key: {'file': (files[my_idx] | basename)}}, recursive=true) }}"  
+    with_dict: "{{targetDevices}}"
+    loop_control:
+      index_var: my_idx
+  
+  - name: print
+    debug:
+      msg: "{{targetDevices}}"
       #verbosity: 1
 
-  - name: GET - to check status of backup, waiting for FINISHED
-    uri:
-      url: "https://{{inventory_hostname}}/mgmt/shared/group-task/{{taskID}}"
-      method: GET
-      user: "{{user}}"
-      password: "{{password}}"
-      validate_certs: no
-    delegate_to: localhost
-    register: statusOfBackup
-    until: statusOfBackup.json.status.find("FINISHED") != -1
-    retries: 45
-    delay: 20
-
-  - name: print results of status check of backup
-    debug:  
-      msg: "{{ statusOfBackup }}"
-      #verbosity: 1
-
-######  BELOW IS TO DOWNLOAD RECENTLY CREATED UCS #####
-
-  - name: find ucs files that were created
-    find:
-      paths: /shared/ucs_backups/
-      patterns: '{{nameOfDeployment}}.*'
-      use_regex: yes
-    register: findFiles
-  
-  - name: print findFiles
-    debug:
-      msg: "{{findFiles}}"
-      verbosity: 1
-
-  - name: set file names to transfer
-    set_fact:
-      findFiles: "{{ findFiles | json_query(query_json) }}"
-    vars:
-      query_json: >
-        files[].path
-  
-  - name: print findFiles
-    debug:
-      msg: "{{findFiles}}"
-
-  - name: filter path to get name of file 
-    set_fact:
-      filesToTransfer: "{{ filesToTransfer + [item | basename] }}"
-    with_items: "{{ findFiles }}"
-  
-  - name: print filesToTransfer
-    debug:
-      msg: "{{filesToTransfer}}"
-      verbosity: 1
-  
-  - name: Get the ucs files that were just created
-    fetch:
-      src: /shared/ucs_backups/{{item}}
-      dest: ../ucs/
-      flat: yes
-    with_items: "{{ filesToTransfer }}"
-
-  # - name: Set_fact - add device specific file to dictionary
-  #   set_fact: 
-  #     targetDevices: "{{  targetDevices[item] | combine({"file": devicesToBeBackedup | json_query(query_json)}) }}"
-  #     #childPoliciesDict: "{{  childPoliciesDict | combine({item: childPolicies | json_query(query_json)}) }}"
-  #   vars:
-  #     query_json: >
-  #       {"device": json.items[{{item}}].hostname, "address": json.items[{{item}}].address, "machineId": json.items[{{item}}].machineId}
-  #   loop: "{{ range(0, (numOfDevices | int)) |list }}"
 
 ######  PAUSE TO ALLOW FOR RE-PAVE ACTIVITIES #####
 
