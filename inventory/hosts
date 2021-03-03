@@ -1,6 +1,6 @@
 
-[bigiq_host]
-10.1.1.4 ansible_user=admin ansible_ssh_password=purple123
+[bigiq]
+10.1.1.4 ansible_user=admin ansible_pass=purple123
 
 [bigips]
 BOS-vBIGIP01.termmarc.com ansible_host=10.1.1.8

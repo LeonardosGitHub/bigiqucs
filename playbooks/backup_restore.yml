@@ -16,8 +16,6 @@
     targetDevices: {}
     targetDeviceswFile: {}
     filesToTransfer: []
-    #dateTimeDeployment: "{{ lookup('pipe', 'date \"+%Y%m%d%H%M\"') }}"
-   
 
   # vars_prompt:
   #   - name: password
@@ -33,16 +31,6 @@
   #     private: no
 
   tasks:
-  - name: Creating an empty file
-    file:
-      path: "../vars/play_vars.yml"
-      state: touch
-    delegate_to: localhost
-    
-  - name: print
-    debug:
-      msg: "{{item | basename}}"
-    loop: "{{ lookup('fileglob', '../ucs/*', wantlist=True) }}"
 
   - name: Get timestamp from the system
     shell: "date +%Y%m%d%H%M"
@@ -150,77 +138,6 @@
       msg: "{{ statusOfBackup }}"
       #verbosity: 1
 
-####### testing below #############
-  # - name: delete after testing
-  #   set_fact:
-  #     statusOfBackup: 
-  #       {
-  #               "attempts": 15,
-  #               "cache_control": "no-store, no-cache, must-revalidate",
-  #               "changed": false,
-  #               "connection": "close",
-  #               "content_length": "1422",
-  #               "content_type": "application/json; charset=UTF-8",
-  #               "cookies": {},
-  #               "cookies_string": "",
-  #               "date": "Tue, 02 Mar 2021 19:52:40 GMT",
-  #               "elapsed": 0,
-  #               "expires": "-1",
-  #               "failed": false,
-  #               "json": {
-  #                   "continueOnError": false,
-  #                   "devicesReference": {
-  #                       "link": "https://localhost/mgmt/shared/resolver/device-groups/Boston/devices?$filter='product'+eq+'BIG-IP'"
-  #                   },
-  #                   "endDateTime": "2021-03-02T11:52:34.291-0800",
-  #                   "generation": 7,
-  #                   "id": "90a6d201-95e7-42e1-9a7e-6fdf8f59c57b",
-  #                   "identityReferences": [
-  #                       {
-  #                           "link": "https://localhost/mgmt/shared/authz/users/admin"
-  #                       }
-  #                   ],
-  #                   "kind": "shared:group-task:devicegrouptaskitemstate",
-  #                   "lastUpdateMicros": 1614714754292774,
-  #                   "ownerMachineId": "e8b6a888-24e4-426c-8088-542f69f6f78d",
-  #                   "progress": "Waiting for tasks to complete.",
-  #                   "selfLink": "https://localhost/mgmt/shared/group-task/90a6d201-95e7-42e1-9a7e-6fdf8f59c57b",
-  #                   "startedTaskReferences": [
-  #                       {
-  #                           "link": "https://localhost/mgmt/cm/system/backup-restore/6d67b746-fa9b-4609-9672-9a1180672fc9"
-  #                       },
-  #                       {
-  #                           "link": "https://localhost/mgmt/cm/system/backup-restore/b3efbc8c-1493-4a38-b24b-21c016b211b7"
-  #                       }
-  #                   ],
-  #                   "status": "FINISHED",
-  #                   "step": "WAIT_FOR_DEVICE_TASKS",
-  #                   "taskBody": {
-  #                       "backupLifeTime": "1",
-  #                       "includePrivateKeys": true,
-  #                       "isEncrypted": true,
-  #                       "name": "ansibleDeploy_202103021147.ucs",
-  #                       "namePrefix": "ansibleDeploy_202103021147_",
-  #                       "obfuscatedPassphrase": "Da/Ggn0mNw7nFIWcR8Z1JvwpRbe8o4t9Hdi0Xcr8qPw=",
-  #                       "selfLink": "https://localhost/mgmt/shared/task-scheduler/scheduler/fefc2b35-6f3b-3c5b-a520-6ff9594948f3",
-  #                       "shouldCreateArchive": "false"
-  #                   },
-  #                   "taskReference": {
-  #                       "link": "http://localhost:8100/cm/system/backup-restore"
-  #                   },
-  #                   "timeoutSeconds": 0,
-  #                   "userReference": {
-  #                       "link": "https://localhost/mgmt/shared/authz/users/admin"
-  #                   }
-  #               },
-  #               "msg": "OK (1422 bytes)",
-  #               "pragma": "no-cache",
-  #               "redirected": false,
-  #               "server": "webd",
-  #               "status": 200,
-  #               "url": "https://ip-10-1-1-4.us-west-2.compute.internal/mgmt/shared/group-task/90a6d201-95e7-42e1-9a7e-6fdf8f59c57b"
-  #           }
-
   - name: Set_fact - set variable to number of devices
     set_fact:
       numOfDevices: "{{ statusOfBackup | json_query('json.startedTaskReferences[].link | length(@)') }}"
@@ -244,7 +161,7 @@
     register: devicesToBeBackedup
     loop: "{{ targetLinkDevices | dict2items }}"
   
-  - name: Print results of device targets
+  - name: Print results - list of devices for backup to create dictionary
     debug:
       msg: "{{ devicesToBeBackedup }}"
       #verbosity: 1
@@ -254,7 +171,7 @@
       targetDevices: "{{  targetDevices | combine({item: devicesToBeBackedup | json_query(query_json)}) }}"
     vars:
       query_json: >
-        {"device": results[{{item}}].json.device.hostname, "address": results[{{item}}].json.device.address, "machineId": results[{{item}}].json.device.machineId, fileName: results[{{item}}].json.name}
+        {"device": results[{{item}}].json.device.hostname, "address": results[{{item}}].json.device.address, "machineId": results[{{item}}].json.device.machineId, "fileName": results[{{item}}].json.name}
     loop: "{{ range(0, (numOfDevices | int)) |list }}"
 
   - name: Print results of device dictionary
@@ -262,7 +179,12 @@
       msg: "{{ targetDevices }}"
       #verbosity: 1
 
-
+  - name: Writing targetDevices to file for backup
+    file:
+      path: "../vars/play_vars.yml"
+      content: /
+        {{targetDevices}}
+    delegate_to: localhost
 
 ######  BELOW IS TO DOWNLOAD RECENTLY CREATED UCS #####
 
@@ -311,26 +233,6 @@
       msg: "{{item | basename}}"
     loop: "{{ lookup('fileglob', '../ucs/*', wantlist=True) }}"
 
-  - name: get files in /ucs
-    set_fact:
-      files: "{{ lookup('fileglob', '../ucs/*', wantlist=True) }}"
-  
-  - name: filter
-    debug:
-      msg: "{{ files | select('match', 'targetDevices.0.device') | list }}"
-
-  - name: Set_fact - add device specific ucs to device dictionary
-    set_fact: 
-      targetDevices: "{{ targetDevices | combine({item.key: {'file': (files[my_idx] | basename)}}, recursive=true) }}"  
-    with_dict: "{{targetDevices}}"
-    loop_control:
-      index_var: my_idx
-  
-  - name: print
-    debug:
-      msg: "{{targetDevices}}"
-      #verbosity: 1
-
 
 ######  PAUSE TO ALLOW FOR RE-PAVE ACTIVITIES #####
 
@@ -349,11 +251,15 @@
 
 #####  BELOW IS TO UPLOAD and install UCS BIG-IPs #####
 
+  # - name: create var
+  #   set_fact:
+  #     targetDevices: {"test0": {"address": "10.1.1.8","device": "BOS-vBIGIP01.termmarc.com","fileName": "ansibleDeploy_202103021733_BOS-vBIGIP01.termmarc.com_20210302173333.ucs","machineId": "ba7382a4-7564-4647-b65d-17d6f2a73a16"},"test1": {"address": "10.1.1.10","device": "BOS-vBIGIP02.termmarc.com","fileName": "ansibleDeploy_202103021733_BOS-vBIGIP02.termmarc.com_20210302173333.ucs","machineId": "57dfa09f-019d-478e-bac3-50a20e55cd20"}}
+
   - name: Set the hostname of the BIG-IP
     bigip_hostname:
-      hostname: "{{item.device}}"
+      hostname: "{{item.value.device}}"
       provider:
-        server: "{{item.address}}"
+        server: "{{item.value.address}}"
         user: "{{user}}"
         password: "{{password}}"
         validate_certs: no
@@ -362,11 +268,11 @@
 
   - name: Upload UCS
     bigip_ucs:
-      ucs: "../ucs/{{item.fileName}}"
+      ucs: "../ucs/{{item.value.fileName}}"
       state: installed
       passphrase: "{{password}}"
       provider:
-        server: "{{item.address}}"
+        server: "{{item.value.address}}"
         user: "{{user}}"
         password: "{{password}}"
         validate_certs: no

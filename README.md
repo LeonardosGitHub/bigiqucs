@@ -13,3 +13,7 @@ During re-pave event
     - upload ucs to re-pave'd "factory reset" device - using ansible module "bigip_ucs"
     - Perform UCS restore - using ansible module "bigip_ucs"
     - re-discover device in big-iq - using ansible module "bigiq_device_discovery"
+
+
+info tmsh[14613]: Begin config install operation: /var/local/ucs/ansibleDeploy_202103021452_BOS-vBIGIP01.termmarc.com_20210302145243.ucs
+info install_ucs.pm: UCS installation success.
