@@ -1,6 +1,6 @@
 ---
 - name: "Using BIG-IQ: Generate backup/ucs of group based on existing schedule; Deploy UCS to BIG-IPs"
-  hosts: all
+  hosts: bigiq
   #connection: local
   gather_facts: no
 
@@ -12,6 +12,7 @@
     password: purple123
     existingBackupName: daily-backup2
     backupDict: {}
+    targetLinkDevices: {}
     targetDevices: {}
     targetDeviceswFile: {}
     filesToTransfer: []
@@ -32,7 +33,12 @@
   #     private: no
 
   tasks:
-
+  - name: Creating an empty file
+    file:
+      path: "../vars/play_vars.yml"
+      state: touch
+    delegate_to: localhost
+    
   - name: print
     debug:
       msg: "{{item | basename}}"
@@ -80,38 +86,175 @@
     debug:
       msg: "{{ backupDict }}"
       #verbosity: 1
-  
-  - name: Get URL for devicesLink
-    set_fact:
-      devicesLink: "{{ backupDict.devicesReference[0].link | urlsplit('path') }}"
+
+
+######  Initiating UCS backup now ######
+
+  - name: POST - to initiate backup encrypted
+    uri:
+      url: "https://{{inventory_hostname}}/mgmt/shared/group-task"
+      method: POST
+      user: "{{user}}"
+      password: "{{password}}"
+      validate_certs: no
+      status_code: 202
+      body: 
+        devicesReference: "{{backupDict.devicesReference[0]}}"
+        taskReference: "{{backupDict.taskReference[0]}}"
+        taskBody:
+          namePrefix: "{{backupDict.taskBody.namePrefix}}"
+          includePrivateKeys: "{{backupDict.taskBody.includePrivateKeys[0]}}"
+          isEncrypted: "{{backupDict.taskBody.isEncrypted[0]}}"
+          backupLifeTime: "{{backupDict.taskBody.backupLifeTime}}"
+          shouldCreateArchive: "{{backupDict.taskBody.shouldCreateArchive}}"
+          name: "{{backupDict.taskBody.name}}"
+          selfLink: "{{backupDict.taskBody.selfLink[0]}}"
+          obfuscatedPassphrase: "{{backupDict.taskBody.obfuscatedPassphrase[0]}}"
+      body_format: json
+    delegate_to: localhost
+    register: resultInitiateBackup
+    when: backupDict.taskBody.obfuscatedPassphrase[0] is defined
+
+  - name: print results of initiating backup
+    debug:  
+      msg: "{{ resultInitiateBackup }}"
       #verbosity: 1
+
+  - name: Set_fact - get task ID
+    set_fact: 
+      taskID: "{{ resultInitiateBackup | json_query(query_json) }}"
+    vars:
+      query_json: >
+        json.id
+
+  - name: print results of taskID
+    debug:  
+      msg: "{{ taskID }}"
+      #verbosity: 1
+
+  - name: GET - to check status of backup, waiting for FINISHED
+    uri:
+      url: "https://{{inventory_hostname}}/mgmt/shared/group-task/{{taskID}}"
+      method: GET
+      user: "{{user}}"
+      password: "{{password}}"
+      validate_certs: no
+    delegate_to: localhost
+    register: statusOfBackup
+    until: statusOfBackup.json.status.find("FINISHED") != -1
+    retries: 45
+    delay: 20
+
+  - name: print results of status check of backup
+    debug:  
+      msg: "{{ statusOfBackup }}"
+      #verbosity: 1
+
+####### testing below #############
+  # - name: delete after testing
+  #   set_fact:
+  #     statusOfBackup: 
+  #       {
+  #               "attempts": 15,
+  #               "cache_control": "no-store, no-cache, must-revalidate",
+  #               "changed": false,
+  #               "connection": "close",
+  #               "content_length": "1422",
+  #               "content_type": "application/json; charset=UTF-8",
+  #               "cookies": {},
+  #               "cookies_string": "",
+  #               "date": "Tue, 02 Mar 2021 19:52:40 GMT",
+  #               "elapsed": 0,
+  #               "expires": "-1",
+  #               "failed": false,
+  #               "json": {
+  #                   "continueOnError": false,
+  #                   "devicesReference": {
+  #                       "link": "https://localhost/mgmt/shared/resolver/device-groups/Boston/devices?$filter='product'+eq+'BIG-IP'"
+  #                   },
+  #                   "endDateTime": "2021-03-02T11:52:34.291-0800",
+  #                   "generation": 7,
+  #                   "id": "90a6d201-95e7-42e1-9a7e-6fdf8f59c57b",
+  #                   "identityReferences": [
+  #                       {
+  #                           "link": "https://localhost/mgmt/shared/authz/users/admin"
+  #                       }
+  #                   ],
+  #                   "kind": "shared:group-task:devicegrouptaskitemstate",
+  #                   "lastUpdateMicros": 1614714754292774,
+  #                   "ownerMachineId": "e8b6a888-24e4-426c-8088-542f69f6f78d",
+  #                   "progress": "Waiting for tasks to complete.",
+  #                   "selfLink": "https://localhost/mgmt/shared/group-task/90a6d201-95e7-42e1-9a7e-6fdf8f59c57b",
+  #                   "startedTaskReferences": [
+  #                       {
+  #                           "link": "https://localhost/mgmt/cm/system/backup-restore/6d67b746-fa9b-4609-9672-9a1180672fc9"
+  #                       },
+  #                       {
+  #                           "link": "https://localhost/mgmt/cm/system/backup-restore/b3efbc8c-1493-4a38-b24b-21c016b211b7"
+  #                       }
+  #                   ],
+  #                   "status": "FINISHED",
+  #                   "step": "WAIT_FOR_DEVICE_TASKS",
+  #                   "taskBody": {
+  #                       "backupLifeTime": "1",
+  #                       "includePrivateKeys": true,
+  #                       "isEncrypted": true,
+  #                       "name": "ansibleDeploy_202103021147.ucs",
+  #                       "namePrefix": "ansibleDeploy_202103021147_",
+  #                       "obfuscatedPassphrase": "Da/Ggn0mNw7nFIWcR8Z1JvwpRbe8o4t9Hdi0Xcr8qPw=",
+  #                       "selfLink": "https://localhost/mgmt/shared/task-scheduler/scheduler/fefc2b35-6f3b-3c5b-a520-6ff9594948f3",
+  #                       "shouldCreateArchive": "false"
+  #                   },
+  #                   "taskReference": {
+  #                       "link": "http://localhost:8100/cm/system/backup-restore"
+  #                   },
+  #                   "timeoutSeconds": 0,
+  #                   "userReference": {
+  #                       "link": "https://localhost/mgmt/shared/authz/users/admin"
+  #                   }
+  #               },
+  #               "msg": "OK (1422 bytes)",
+  #               "pragma": "no-cache",
+  #               "redirected": false,
+  #               "server": "webd",
+  #               "status": 200,
+  #               "url": "https://ip-10-1-1-4.us-west-2.compute.internal/mgmt/shared/group-task/90a6d201-95e7-42e1-9a7e-6fdf8f59c57b"
+  #           }
+
+  - name: Set_fact - set variable to number of devices
+    set_fact:
+      numOfDevices: "{{ statusOfBackup | json_query('json.startedTaskReferences[].link | length(@)') }}"
+
+  - name: Set_fact - create dict links for devices
+    set_fact: 
+      targetLinkDevices: "{{  targetLinkDevices | combine({item: statusOfBackup | json_query(query_json) |  urlsplit('path')}) }}"
+    vars:
+      query_json: >
+        json.startedTaskReferences[{{item}}].link
+    loop: "{{ range(0, (numOfDevices | int)) |list }}"
 
   - name: GET - list of devices for backup to create dictionary
     uri:
-      url: "https://{{inventory_hostname}}{{devicesLink}}"
+      url: "https://{{inventory_hostname}}{{item.value}}"
       method: GET
       user: "{{user}}"
       password: "{{password}}"
       validate_certs: no
     delegate_to: localhost
     register: devicesToBeBackedup
-
+    loop: "{{ targetLinkDevices | dict2items }}"
+  
   - name: Print results of device targets
     debug:
       msg: "{{ devicesToBeBackedup }}"
       #verbosity: 1
 
-  - name: Set_fact - set variable to number of devices
-    set_fact:
-      numOfDevices: "{{ devicesToBeBackedup | json_query('json.items[] | length(@)') }}"
-
   - name: Set_fact - create dict of devices to be updated
     set_fact: 
       targetDevices: "{{  targetDevices | combine({item: devicesToBeBackedup | json_query(query_json)}) }}"
-      #childPoliciesDict: "{{  childPoliciesDict | combine({item: childPolicies | json_query(query_json)}) }}"
     vars:
       query_json: >
-        {"device": json.items[{{item}}].hostname, "address": json.items[{{item}}].address, "machineId": json.items[{{item}}].machineId, "file": ""}
+        {"device": results[{{item}}].json.device.hostname, "address": results[{{item}}].json.device.address, "machineId": results[{{item}}].json.device.machineId, fileName: results[{{item}}].json.name}
     loop: "{{ range(0, (numOfDevices | int)) |list }}"
 
   - name: Print results of device dictionary
@@ -119,115 +262,53 @@
       msg: "{{ targetDevices }}"
       #verbosity: 1
 
-######  Initiating UCS backup now ######
 
-#   - name: POST - to initiate backup encrypted
-#     uri:
-#       url: "https://{{inventory_hostname}}/mgmt/shared/group-task"
-#       method: POST
-#       user: "{{user}}"
-#       password: "{{password}}"
-#       validate_certs: no
-#       status_code: 202
-#       body: 
-#         devicesReference: "{{backupDict.devicesReference[0]}}"
-#         taskReference: "{{backupDict.taskReference[0]}}"
-#         taskBody:
-#           namePrefix: "{{backupDict.taskBody.namePrefix}}"
-#           includePrivateKeys: "{{backupDict.taskBody.includePrivateKeys[0]}}"
-#           isEncrypted: "{{backupDict.taskBody.isEncrypted[0]}}"
-#           backupLifeTime: "{{backupDict.taskBody.backupLifeTime}}"
-#           shouldCreateArchive: "{{backupDict.taskBody.shouldCreateArchive}}"
-#           name: "{{backupDict.taskBody.name}}"
-#           selfLink: "{{backupDict.taskBody.selfLink[0]}}"
-#           obfuscatedPassphrase: "{{backupDict.taskBody.obfuscatedPassphrase[0]}}"
-#       body_format: json
-#     delegate_to: localhost
-#     register: resultInitiateBackup
-#     when: backupDict.taskBody.obfuscatedPassphrase[0] is defined
 
-#   - name: print results of initiating backup
-#     debug:  
-#       msg: "{{ resultInitiateBackup }}"
-#       #verbosity: 1
+######  BELOW IS TO DOWNLOAD RECENTLY CREATED UCS #####
 
-#   - name: Set_fact - get task ID
-#     set_fact: 
-#       taskID: "{{ resultInitiateBackup | json_query(query_json) }}"
-#     vars:
-#       query_json: >
-#         json.id
-
-#   - name: print results of taskID
-#     debug:  
-#       msg: "{{ taskID }}"
-#       #verbosity: 1
-
-#   - name: GET - to check status of backup, waiting for FINISHED
-#     uri:
-#       url: "https://{{inventory_hostname}}/mgmt/shared/group-task/{{taskID}}"
-#       method: GET
-#       user: "{{user}}"
-#       password: "{{password}}"
-#       validate_certs: no
-#     delegate_to: localhost
-#     register: statusOfBackup
-#     until: statusOfBackup.json.status.find("FINISHED") != -1
-#     retries: 45
-#     delay: 20
-
-#   - name: print results of status check of backup
-#     debug:  
-#       msg: "{{ statusOfBackup }}"
-#       #verbosity: 1
-
-# ######  BELOW IS TO DOWNLOAD RECENTLY CREATED UCS #####
-
-#   - name: find ucs files that were created
-#     find:
-#       paths: /shared/ucs_backups/
-#       patterns: '{{nameOfDeployment}}.*'
-#       use_regex: yes
-#     register: findFiles
+  - name: find ucs files that were created
+    find:
+      paths: /shared/ucs_backups/
+      patterns: '{{nameOfDeployment}}.*'
+      use_regex: yes
+    register: findFiles
   
-#   - name: print findFiles
-#     debug:
-#       msg: "{{findFiles}}"
-#       verbosity: 1
+  - name: print findFiles
+    debug:
+      msg: "{{findFiles}}"
+      verbosity: 1
 
-#   - name: set file names to transfer
-#     set_fact:
-#       findFiles: "{{ findFiles | json_query(query_json) }}"
-#     vars:
-#       query_json: >
-#         files[].path
+  - name: set file names to transfer
+    set_fact:
+      findFiles: "{{ findFiles | json_query(query_json) }}"
+    vars:
+      query_json: >
+        files[].path
   
-#   - name: print findFiles
-#     debug:
-#       msg: "{{findFiles}}"
+  - name: print findFiles
+    debug:
+      msg: "{{findFiles}}"
 
-#   - name: filter path to get name of file 
-#     set_fact:
-#       filesToTransfer: "{{ filesToTransfer + [item | basename] }}"
-#     with_items: "{{ findFiles }}"
+  - name: filter path to get name of file 
+    set_fact:
+      filesToTransfer: "{{ filesToTransfer + [item | basename] }}"
+    with_items: "{{ findFiles }}"
   
-#   - name: print filesToTransfer
-#     debug:
-#       msg: "{{filesToTransfer}}"
-#       verbosity: 1
+  - name: print filesToTransfer
+    debug:
+      msg: "{{filesToTransfer}}"
+      verbosity: 1
   
-#   - name: Get the ucs files that were just created
-#     fetch:
-#       src: /shared/ucs_backups/{{item}}
-#       dest: ../ucs/
-#       flat: yes
-#     with_items: "{{ filesToTransfer }}"
+  - name: Get the ucs files that were just created
+    fetch:
+      src: /shared/ucs_backups/{{item}}
+      dest: ../ucs/
+      flat: yes
+    with_items: "{{ filesToTransfer }}"
 
   - name: print
     debug:
-      #msg: "{{ (item|selectattr(item,'contains', '.*BIGIP01.')).master }}"
       msg: "{{item | basename}}"
-      #msg: "{{ item | select('match', '^(eth|wlan)[0-9]+') | list }}"
     loop: "{{ lookup('fileglob', '../ucs/*', wantlist=True) }}"
 
   - name: get files in /ucs
@@ -270,45 +351,47 @@
 
   - name: Set the hostname of the BIG-IP
     bigip_hostname:
-      hostname: "{{targetDevices[item].device}}"
+      hostname: "{{item.device}}"
       provider:
-        server: "{{targetDevices[item].address}}"
+        server: "{{item.address}}"
         user: "{{user}}"
         password: "{{password}}"
         validate_certs: no
     delegate_to: localhost
-    loop: "{{ range(0, (numOfDevices | int)) |list }}"
+    loop: "{{ targetDevices | dict2items }}"
 
   - name: Upload UCS
     bigip_ucs:
-      ucs: ../ucs/ansibleDeploy_202103010845_BOS-vBIGIP02.termmarc.com.*.ucs
-      #state: installed
+      ucs: "../ucs/{{item.fileName}}"
+      state: installed
       passphrase: "{{password}}"
       provider:
-        server: "10.1.1.8"
+        server: "{{item.address}}"
         user: "{{user}}"
         password: "{{password}}"
         validate_certs: no
     delegate_to: localhost
     ignore_errors: True
+    loop: "{{ targetDevices | dict2items }}"
 
-  - name: Get status of device in BIG-IQ
-    uri:
-      url: "https://{{inventory_hostname}}/mgmt/shared/resolver/device-groups/cm-bigip-allBigIpDevices/devices/ba7382a4-7564-4647-b65d-17d6f2a73a16/stats"
-      method: GET
-      status_code: 200
-      user: "{{user}}"
-      password: "{{password}}"
-      validate_certs: no
-    delegate_to: localhost
-    register: getStatusOnBigiq
+  # - name: Get status of device in BIG-IQ
+  #   uri:
+  #     url: "https://{{inventory_hostname}}/mgmt/shared/resolver/device-groups/cm-bigip-allBigIpDevices/devices/ba7382a4-7564-4647-b65d-17d6f2a73a16/stats"
+  #     method: GET
+  #     status_code: 200
+  #     user: "{{user}}"
+  #     password: "{{password}}"
+  #     validate_certs: no
+  #   delegate_to: localhost
+  #   register: getStatusOnBigiq
+
   
-  - name: print debug
-    debug:
-      msg: "{{getStatusOnBigiq | json_query(query_json) }}"
-    vars:
-      query_json: >
-        json.entries."health.summary".value
+  # - name: print debug
+  #   debug:
+  #     msg: "{{getStatusOnBigiq | json_query(query_json) }}"
+  #   vars:
+  #     query_json: >
+  #       json.entries."health.summary".value
 
 
   # - name: POST - to load UCS
@@ -352,11 +435,6 @@
   #     device_password: "{{password}}"
   #     modules:
   #       - ltm
-  #       - apm
-  #       - asm
-  #       - afm
-  #       - dns
-  #       - security_shared
   #     force: yes
   #     access_group_name: boston
   #     access_conflict_policy: use_bigiq
