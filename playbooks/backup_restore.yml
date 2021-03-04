@@ -10,7 +10,7 @@
   vars:
     user: admin
     password: purple123
-    existingBackupName: daily-backupAll
+    existingBackupName: daily-backup2
     backupDict: {}
     targetLinkDevices: {}
     targetDevices: {}
@@ -223,12 +223,6 @@
       dest: ../ucs/
       flat: yes
     with_items: "{{ filesToTransfer }}"
-
-  - name: print
-    debug:
-      msg: "{{item | basename}}"
-    loop: "{{ lookup('fileglob', '../ucs/*', wantlist=True) }}"
-    verbosity: 1
 
 
 ######  PAUSE TO ALLOW FOR RE-PAVE ACTIVITIES #####
