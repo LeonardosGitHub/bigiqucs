@@ -10,7 +10,7 @@
   vars:
     user: admin
     password: purple123
-    existingBackupName: daily-backup2
+    existingBackupName: daily-backupAll
     backupDict: {}
     targetLinkDevices: {}
     targetDevices: {}
@@ -36,19 +36,15 @@
     shell: "date +%Y%m%d%H%M"
     register: day_time
 
-  - name: set day & time var
+  - name: Set Fact - set day_time var
     set_fact: 
       day_time: "{{day_time.stdout}}"
 
-  - name: print day & time var
-    debug:
-      msg: "{{day_time}}"
-
-  - name: set name of deployment
+  - name: Set Fact - set name of deployment
     set_fact:
       nameOfDeployment: "ansibleDeploy_{{day_time}}"
       
-  - name: GET - list of scheduled backups
+  - name: GET - list of all scheduled backups from BIG-IQ
     uri:
       url: "https://{{inventory_hostname}}/mgmt/shared/task-scheduler/scheduler/"
       method: GET
@@ -63,7 +59,7 @@
       msg: "{{scheduledBackups}}"
       verbosity: 1
 
-  - name: Set_fact - create dict of scheduled backup values
+  - name: Set_fact - create dict of scheduled backup values that match provided name
     set_fact: 
       backupDict: "{{ scheduledBackups | json_query(query_json) }}"
     vars:
@@ -78,7 +74,7 @@
 
 ######  Initiating UCS backup now ######
 
-  - name: POST - to initiate backup encrypted
+  - name: POST - to initiate scheduled backup task
     uri:
       url: "https://{{inventory_hostname}}/mgmt/shared/group-task"
       method: POST
@@ -103,24 +99,24 @@
     register: resultInitiateBackup
     when: backupDict.taskBody.obfuscatedPassphrase[0] is defined
 
-  - name: print results of initiating backup
+  - name: Print results of initiating backup
     debug:  
       msg: "{{ resultInitiateBackup }}"
-      #verbosity: 1
+      verbosity: 1
 
-  - name: Set_fact - get task ID
+  - name: Set_fact - get task ID from scheduled backup task
     set_fact: 
       taskID: "{{ resultInitiateBackup | json_query(query_json) }}"
     vars:
       query_json: >
         json.id
 
-  - name: print results of taskID
+  - name: Print results of taskID
     debug:  
       msg: "{{ taskID }}"
-      #verbosity: 1
+      verbosity: 1
 
-  - name: GET - to check status of backup, waiting for FINISHED
+  - name: GET - to check status of backup, waiting/checking for task to 'FINISHED' status
     uri:
       url: "https://{{inventory_hostname}}/mgmt/shared/group-task/{{taskID}}"
       method: GET
@@ -133,16 +129,16 @@
     retries: 45
     delay: 20
 
-  - name: print results of status check of backup
+  - name: Print results of status check of backup
     debug:  
       msg: "{{ statusOfBackup }}"
-      #verbosity: 1
+      verbosity: 1
 
-  - name: Set_fact - set variable to number of devices
+  - name: Set Fact - set variable to number of devices in backup task
     set_fact:
       numOfDevices: "{{ statusOfBackup | json_query('json.startedTaskReferences[].link | length(@)') }}"
 
-  - name: Set_fact - create dict links for devices
+  - name: Set Fact - create dict of links for devices in backup task
     set_fact: 
       targetLinkDevices: "{{  targetLinkDevices | combine({item: statusOfBackup | json_query(query_json) |  urlsplit('path')}) }}"
     vars:
@@ -150,7 +146,7 @@
         json.startedTaskReferences[{{item}}].link
     loop: "{{ range(0, (numOfDevices | int)) |list }}"
 
-  - name: GET - list of devices for backup to create dictionary
+  - name: GET - list of devices and device specific information for backup to create dictionary of devices
     uri:
       url: "https://{{inventory_hostname}}{{item.value}}"
       method: GET
@@ -164,9 +160,9 @@
   - name: Print results - list of devices for backup to create dictionary
     debug:
       msg: "{{ devicesToBeBackedup }}"
-      #verbosity: 1
+      verbosity: 1
 
-  - name: Set_fact - create dict of devices to be updated
+  - name: Set Fact - create dict of devices to be updated
     set_fact: 
       targetDevices: "{{  targetDevices | combine({item: devicesToBeBackedup | json_query(query_json)}) }}"
     vars:
@@ -177,18 +173,17 @@
   - name: Print results of device dictionary
     debug:
       msg: "{{ targetDevices }}"
-      #verbosity: 1
-
-  - name: Writing targetDevices to file for backup
-    file:
-      path: "../vars/play_vars.yml"
-      content: /
-        {{targetDevices}}
+      verbosity: 1
+  
+  - name: Write targetDevices dictionary to a file for backup purposes
+    copy: 
+      content="targetDevices{{ ":" }} {{ targetDevices }}"
+      dest=../ucs/targetDevices.json
     delegate_to: localhost
 
 ######  BELOW IS TO DOWNLOAD RECENTLY CREATED UCS #####
 
-  - name: find ucs files that were created
+  - name: Find ucs files on BIG-IQ that were created and put into a list
     find:
       paths: /shared/ucs_backups/
       patterns: '{{nameOfDeployment}}.*'
@@ -200,7 +195,7 @@
       msg: "{{findFiles}}"
       verbosity: 1
 
-  - name: set file names to transfer
+  - name: Set Fact - file names to transfer to devices
     set_fact:
       findFiles: "{{ findFiles | json_query(query_json) }}"
     vars:
@@ -210,18 +205,19 @@
   - name: print findFiles
     debug:
       msg: "{{findFiles}}"
+      verbosity: 1
 
-  - name: filter path to get name of file 
+  - name: Set Fact - filter path to get only the name of file
     set_fact:
       filesToTransfer: "{{ filesToTransfer + [item | basename] }}"
     with_items: "{{ findFiles }}"
   
-  - name: print filesToTransfer
+  - name: Print filesToTransfer
     debug:
       msg: "{{filesToTransfer}}"
       verbosity: 1
   
-  - name: Get the ucs files that were just created
+  - name: Fetch - pull the ucs files that were just created from BIG-IQ to Ansible host
     fetch:
       src: /shared/ucs_backups/{{item}}
       dest: ../ucs/
@@ -232,28 +228,21 @@
     debug:
       msg: "{{item | basename}}"
     loop: "{{ lookup('fileglob', '../ucs/*', wantlist=True) }}"
+    verbosity: 1
 
 
 ######  PAUSE TO ALLOW FOR RE-PAVE ACTIVITIES #####
 
-  - name: Do you want to continue
+  - name: Print msg about waiting for re-pave
     debug:
       msg: "The playbook will pause while a re-pave effort is completed. Please follow the PAUSE instructions. -tmsh load sys config default -Reboot -set Password"
-    tags:
-      - always
 
-  - name: pause for 7200 seconds
+
+  - name: Pause for 14400 seconds (4 hours)
     pause:
-      seconds: 7200
-    tags:
-      - always
-
+      seconds: 14400
 
 #####  BELOW IS TO UPLOAD and install UCS BIG-IPs #####
-
-  # - name: create var
-  #   set_fact:
-  #     targetDevices: {"test0": {"address": "10.1.1.8","device": "BOS-vBIGIP01.termmarc.com","fileName": "ansibleDeploy_202103021733_BOS-vBIGIP01.termmarc.com_20210302173333.ucs","machineId": "ba7382a4-7564-4647-b65d-17d6f2a73a16"},"test1": {"address": "10.1.1.10","device": "BOS-vBIGIP02.termmarc.com","fileName": "ansibleDeploy_202103021733_BOS-vBIGIP02.termmarc.com_20210302173333.ucs","machineId": "57dfa09f-019d-478e-bac3-50a20e55cd20"}}
 
   - name: Set the hostname of the BIG-IP
     bigip_hostname:
@@ -280,75 +269,24 @@
     ignore_errors: True
     loop: "{{ targetDevices | dict2items }}"
 
-  # - name: Get status of device in BIG-IQ
-  #   uri:
-  #     url: "https://{{inventory_hostname}}/mgmt/shared/resolver/device-groups/cm-bigip-allBigIpDevices/devices/ba7382a4-7564-4647-b65d-17d6f2a73a16/stats"
-  #     method: GET
-  #     status_code: 200
-  #     user: "{{user}}"
-  #     password: "{{password}}"
-  #     validate_certs: no
-  #   delegate_to: localhost
-  #   register: getStatusOnBigiq
+  - name: Get status of devices in BIG-IQ, once device on BIG-IQ turn "green" it'll pass condition
+    uri:
+      url: "https://{{inventory_hostname}}/mgmt/shared/resolver/device-groups/cm-bigip-allBigIpDevices/devices/{{item.value.machineId}}/stats"
+      method: GET
+      status_code: 200
+      user: "{{user}}"
+      password: "{{password}}"
+      validate_certs: no
+    delegate_to: localhost
+    register: getStatusOnBigiq
+    loop: "{{ targetDevices | dict2items }}"
+    until: getStatusOnBigiq['json']['entries']['health.summary']['value'] == 1.0
+    retries: 90
+    delay: 20
 
-  
-  # - name: print debug
-  #   debug:
-  #     msg: "{{getStatusOnBigiq | json_query(query_json) }}"
-  #   vars:
-  #     query_json: >
-  #       json.entries."health.summary".value
-
-
-  # - name: POST - to load UCS
-  #   uri:
-  #     url: "https://{{bigipIP}}/mgmt/tm/sys/ucs"
-  #     method: POST
-  #     body: 
-  #       command: load
-  #       name: ansibleDeploy_202103010922_BOS-vBIGIP01.termmarc.com_ansibleDeploy_202103010922.ucs
-  #     body_format: json
-  #     status_code: 202,200
-  #     user: "{{user}}"
-  #     password: "{{password}}"
-  #     validate_certs: no
-  #     timeout: 120
-  #   delegate_to: localhost
-  #   register: returnOfUcsPost
-
-  # - name: print results of POST of UCS
-  #   debug:
-  #     msg: "{{returnOfUcsPost}}"
-    
-######  BELOW IS TO RE-DISCOVER THE DEVICES AFTER RE-PAVE #####
-
-  # - name: Collect BIG-IQ information
-  #   bigiq_device_info:
-  #     gather_subset:
-  #       - vlans
-  #     provider:
-  #       user: "{{user}}"
-  #       password: "{{password}}"
-  #       server: "{{inventory_hostname}}"
-  #       validate_certs: no
-  #       #auth_provider: local
-  #   delegate_to: localhost
-
-  # - name: Re-discover device and import config, use default conflict policy.
-  #   bigiq_device_discovery:
-  #     device_address: "10.1.1.8"
-  #     device_username: "{{user}}"
-  #     device_password: "{{password}}"
-  #     modules:
-  #       - ltm
-  #     force: yes
-  #     access_group_name: boston
-  #     access_conflict_policy: use_bigiq
-  #     #access_conflict_policy: use_bigiq
-  #     provider:
-  #       password: "{{password}}"
-  #       server: "{{inventory_hostname}}"
-  #       user: "{{user}}"
-  #       validate_certs: no
-  #       #auth_provider: local
-  #   delegate_to: localhost
+  - name: debug
+    debug:
+      msg: '{{getStatusOnBigiq | json_query(query_json)}}'
+    vars:
+      query_json: >
+        results[].json.entries."health.summary".value
