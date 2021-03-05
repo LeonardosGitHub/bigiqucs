@@ -9,32 +9,32 @@
 
   vars:
     user: admin
-    password: purple123
-    existingBackupName: daily-backup2
+    #password: <password>
+    existingBackupName: ansible-backup
     backupDict: {}
     targetLinkDevices: {}
     targetDevices: {}
     targetDeviceswFile: {}
     filesToTransfer: []
 
-  # vars_prompt:
-  #   - name: password
-  #     prompt: "Enter Password"
-  #     private: no
+
+  vars_prompt:
+    - name: password
+      prompt: "Enter Password"
+      private: yes
 
   #   - name: existingBackupName
   #     prompt: "Copy and paste your existing scheduled Backup name here"
   #     private: no
 
-  #   - name: bigipIP
-  #     prompt: "Input IP of BIGIP"
-  #     private: no
-
   tasks:
 
   - name: Get timestamp from the system
-    shell: "date +%Y%m%d%H%M"
+    shell:
+      cmd: "date +%Y%m%d%H%M"
+      executable: /bin/bash
     register: day_time
+    
 
   - name: Set Fact - set day_time var
     set_fact: 
@@ -51,6 +51,7 @@
       user: "{{user}}"
       password: "{{password}}"
       validate_certs: no
+      force_basic_auth: yes
     delegate_to: localhost
     register: scheduledBackups
 
@@ -134,6 +135,8 @@
       msg: "{{ statusOfBackup }}"
       verbosity: 1
 
+##########  CREATING DICTIONARY OF DEVICES BEING BACKED UP #############
+
   - name: Set Fact - set variable to number of devices in backup task
     set_fact:
       numOfDevices: "{{ statusOfBackup | json_query('json.startedTaskReferences[].link | length(@)') }}"
@@ -178,7 +181,7 @@
   - name: Write targetDevices dictionary to a file for backup purposes
     copy: 
       content="targetDevices{{ ":" }} {{ targetDevices }}"
-      dest=../ucs/targetDevices.json
+      dest=../vars/targetDevices.json
     delegate_to: localhost
 
 ######  BELOW IS TO DOWNLOAD RECENTLY CREATED UCS #####
@@ -243,11 +246,14 @@
       hostname: "{{item.value.device}}"
       provider:
         server: "{{item.value.address}}"
+        server_port: "{{item.value.serverPort}}"
         user: "{{user}}"
         password: "{{password}}"
         validate_certs: no
     delegate_to: localhost
     loop: "{{ targetDevices | dict2items }}"
+    tags:
+      - uploadInstallUCS
 
   - name: Upload UCS
     bigip_ucs:
@@ -256,12 +262,15 @@
       passphrase: "{{password}}"
       provider:
         server: "{{item.value.address}}"
+        server_port: "{{item.value.serverPort}}"
         user: "{{user}}"
         password: "{{password}}"
         validate_certs: no
     delegate_to: localhost
     ignore_errors: True
     loop: "{{ targetDevices | dict2items }}"
+    tags:
+      - uploadInstallUCS
 
   - name: Get status of devices in BIG-IQ, once device on BIG-IQ turn "green" it'll pass condition
     uri:
@@ -277,6 +286,8 @@
     until: getStatusOnBigiq['json']['entries']['health.summary']['value'] == 1.0
     retries: 90
     delay: 20
+    tags:
+      - uploadInstallUCS
 
   - name: debug
     debug:
@@ -284,3 +295,5 @@
     vars:
       query_json: >
         results[].json.entries."health.summary".value
+    tags:
+      - uploadInstallUCS

@@ -1,10 +1,10 @@
 
 [bigiq]
-10.1.1.4 ansible_user=admin ansible_ssh_pass=purple123
+<BIGIQ-IP> ansible_user=lsimon ansible_ssh_pass=<PASSWORD>
+
 
 
 
 [all:vars]
-UCS= ../ucs
 ansible_user=admin
-ansible_pass=purple123
+ansible_pass=<PASSWORD>
