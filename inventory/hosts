@@ -1,6 +1,6 @@
 
 [bigiq]
-<BIGIQ-IP> ansible_user=lsimon ansible_ssh_pass=<PASSWORD>
+<BIGIQ-IP> ansible_user=admin ansible_ssh_pass=<PASSWORD>
 
 
 
