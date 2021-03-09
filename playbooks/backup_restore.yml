@@ -10,12 +10,11 @@
   vars:
     user: admin
     #password: <password>
-    existingBackupName: ansible-backup
+    existingBackupName: ansibleBackup
     bigIPmgmtPort: 443
     backupDict: {}
     targetLinkDevices: {}
     targetDevices: {}
-    targetDeviceswFile: {}
     preRePaveCompare: {}
     filesToTransfer: []
 
@@ -204,7 +203,7 @@
       targetDevices: "{{  targetDevices | combine({item: devicesToBeBackedup | json_query(query_json)}) }}"
     vars:
       query_json: >
-        {"device": results[{{item}}].json.device.hostname, "address": results[{{item}}].json.device.address, "machineId": results[{{item}}].json.device.machineId, "fileName": results[{{item}}].json.name, "serverPort": "{{bigIPmgmtPort}}"}
+        {"device": results[{{item}}].json.device.hostname, "address": results[{{item}}].json.device.address, "machineId": results[{{item}}].json.device.machineId, "fileName": results[{{item}}].json.name, "serverPort": '{{bigIPmgmtPort}}'}
     loop: "{{ range(0, (numOfDevices | int)) |list }}"
     tags:
       - ucsSetDevices
@@ -256,6 +255,14 @@
     debug:
       msg: "{{poolsLinks}}"
       verbosity: 1
+    tags:
+      - ucsPreRepave
+
+  - name: Write poolsLinks dictionary to a file for backup purposes
+    copy: 
+      content="poolsLinks{{ ":" }} {{ poolsLinks }}"
+      dest=../vars/poolsLinks.json
+    delegate_to: localhost
     tags:
       - ucsPreRepave
 
@@ -375,6 +382,18 @@
     tags:
       - ucsDeploy
 
+  - name: Save the running configuration of the BIG-IP
+    bigip_config:
+      save: yes
+      provider:
+        server: "{{item.value.address}}"
+        server_port: "{{item.value.serverPort}}"
+        user: "{{user}}"
+        password: "{{password}}"
+        validate_certs: no
+    delegate_to: localhost
+    loop: "{{ targetDevices | dict2items }}"
+
   - name: Upload UCS
     bigip_ucs:
       ucs: "../ucs/{{item.value.fileName}}"
@@ -391,6 +410,14 @@
     loop: "{{ targetDevices | dict2items }}"
     tags:
       - ucsDeploy
+
+#####  Pause 5 minutes to allow for BIG-IPs restore to settle #####
+
+  - name: Pause for 300 seconds (5 min)
+    pause:
+      seconds: 300
+    tags:
+      - always
 
 #####  BELOW IS TO CHECK FOR SUCCESSFUL INSTALL OF UCSs ON BIG-IPs #####
 
@@ -410,7 +437,7 @@
     tags:
       - postUcsUpload
   
-  - name: Check /var/log/ltm for log message of UCS installation suceess on BIG-IPs
+  - name: Check /var/log/ltm for log message of UCS installation success on BIG-IPs
     uri:
       url: "https://{{inventory_hostname}}/mgmt/shared/resolver/device-groups/cm-bigip-allBigIpDevices/devices/{{item.value.machineId}}/rest-proxy/mgmt/tm/util/bash"
       method: POST
