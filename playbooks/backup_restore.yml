@@ -9,40 +9,46 @@
 
   vars:
     user: admin
-    password: purple123
-    existingBackupName: daily-backup2
+    #password: <password>
+    existingBackupName: ansible-backup
+    bigIPmgmtPort: 443
     backupDict: {}
     targetLinkDevices: {}
     targetDevices: {}
     targetDeviceswFile: {}
+    preRePaveCompare: {}
     filesToTransfer: []
 
-  # vars_prompt:
-  #   - name: password
-  #     prompt: "Enter Password"
-  #     private: no
+
+  vars_prompt:
+    - name: password
+      prompt: "Enter Password"
+      private: yes
 
   #   - name: existingBackupName
   #     prompt: "Copy and paste your existing scheduled Backup name here"
   #     private: no
 
-  #   - name: bigipIP
-  #     prompt: "Input IP of BIGIP"
-  #     private: no
-
   tasks:
-
   - name: Get timestamp from the system
-    shell: "date +%Y%m%d%H%M"
+    shell:
+      cmd: "date +%Y%m%d%H%M"
+      executable: /bin/bash
     register: day_time
+    tags:
+      - ucsInit
 
   - name: Set Fact - set day_time var
     set_fact: 
       day_time: "{{day_time.stdout}}"
+    tags:
+      - ucsInit
 
   - name: Set Fact - set name of deployment
     set_fact:
       nameOfDeployment: "ansibleDeploy_{{day_time}}"
+    tags:
+      - ucsInit
       
   - name: GET - list of all scheduled backups from BIG-IQ
     uri:
@@ -51,13 +57,18 @@
       user: "{{user}}"
       password: "{{password}}"
       validate_certs: no
+      force_basic_auth: yes
     delegate_to: localhost
     register: scheduledBackups
+    tags:
+      - ucsInit
 
   - name: Print result of get for scheduled backups
     debug:
       msg: "{{scheduledBackups}}"
       verbosity: 1
+    tags:
+      - ucsInit
 
   - name: Set_fact - create dict of scheduled backup values that match provided name
     set_fact: 
@@ -65,11 +76,15 @@
     vars:
       query_json: >
         {"devicesReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.devicesReference, "taskReference": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskReference, "taskBody": {"namePrefix": '{{nameOfDeployment}}_', "includePrivateKeys": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.includePrivateKeys, "isEncrypted": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.isEncrypted, "backupLifeTime": '1', "shouldCreateArchive": 'false', "name": '{{nameOfDeployment}}.ucs', "selfLink": json.items[?name=='{{existingBackupName}}'].selfLink, "obfuscatedPassphrase": json.items[?name=='{{existingBackupName}}'].taskBodyToRun.taskBody.obfuscatedPassphrase}}
+    tags:
+      - ucsInit
 
   - name: Print dict of backup values
     debug:
       msg: "{{ backupDict }}"
       #verbosity: 1
+    tags:
+      - ucsInit
 
 
 ######  Initiating UCS backup now ######
@@ -98,11 +113,15 @@
     delegate_to: localhost
     register: resultInitiateBackup
     when: backupDict.taskBody.obfuscatedPassphrase[0] is defined
+    tags:
+      - ucsCreate
 
   - name: Print results of initiating backup
     debug:  
       msg: "{{ resultInitiateBackup }}"
       verbosity: 1
+    tags:
+      - ucsCreate
 
   - name: Set_fact - get task ID from scheduled backup task
     set_fact: 
@@ -110,11 +129,15 @@
     vars:
       query_json: >
         json.id
+    tags:
+      - ucsCreate
 
   - name: Print results of taskID
     debug:  
       msg: "{{ taskID }}"
       verbosity: 1
+    tags:
+      - ucsCreate
 
   - name: GET - to check status of backup, waiting/checking for task to 'FINISHED' status
     uri:
@@ -128,15 +151,23 @@
     until: statusOfBackup.json.status.find("FINISHED") != -1
     retries: 45
     delay: 20
+    tags:
+      - ucsCreate
 
   - name: Print results of status check of backup
     debug:  
       msg: "{{ statusOfBackup }}"
       verbosity: 1
+    tags:
+      - ucsCreate
+
+##########  CREATING DICTIONARY OF DEVICES BEING BACKED UP #############
 
   - name: Set Fact - set variable to number of devices in backup task
     set_fact:
       numOfDevices: "{{ statusOfBackup | json_query('json.startedTaskReferences[].link | length(@)') }}"
+    tags:
+      - ucsSetDevices
 
   - name: Set Fact - create dict of links for devices in backup task
     set_fact: 
@@ -145,6 +176,8 @@
       query_json: >
         json.startedTaskReferences[{{item}}].link
     loop: "{{ range(0, (numOfDevices | int)) |list }}"
+    tags:
+      - ucsSetDevices
 
   - name: GET - list of devices and device specific information for backup to create dictionary of devices
     uri:
@@ -156,30 +189,102 @@
     delegate_to: localhost
     register: devicesToBeBackedup
     loop: "{{ targetLinkDevices | dict2items }}"
+    tags:
+      - ucsSetDevices
   
   - name: Print results - list of devices for backup to create dictionary
     debug:
       msg: "{{ devicesToBeBackedup }}"
       verbosity: 1
+    tags:
+      - ucsSetDevices
 
   - name: Set Fact - create dict of devices to be updated
     set_fact: 
       targetDevices: "{{  targetDevices | combine({item: devicesToBeBackedup | json_query(query_json)}) }}"
     vars:
       query_json: >
-        {"device": results[{{item}}].json.device.hostname, "address": results[{{item}}].json.device.address, "machineId": results[{{item}}].json.device.machineId, "fileName": results[{{item}}].json.name}
+        {"device": results[{{item}}].json.device.hostname, "address": results[{{item}}].json.device.address, "machineId": results[{{item}}].json.device.machineId, "fileName": results[{{item}}].json.name, "serverPort": "{{bigIPmgmtPort}}"}
     loop: "{{ range(0, (numOfDevices | int)) |list }}"
+    tags:
+      - ucsSetDevices
 
   - name: Print results of device dictionary
     debug:
       msg: "{{ targetDevices }}"
       verbosity: 1
+    tags:
+      - ucsSetDevices
   
   - name: Write targetDevices dictionary to a file for backup purposes
     copy: 
       content="targetDevices{{ ":" }} {{ targetDevices }}"
-      dest=../ucs/targetDevices.json
+      dest=../vars/targetDevices.json
     delegate_to: localhost
+    tags:
+      - ucsSetDevices
+
+######  BELOW IS TO GET A POOL STATUSES BEFORE RE-PAVE ACTIVITY #####
+
+  - name: GET - list of pools and member links to create status pre-repave activities
+    uri:
+      url: "https://{{inventory_hostname}}/mgmt/shared/resolver/device-groups/cm-bigip-allBigIpDevices/devices/{{item.value.machineId}}/rest-proxy/mgmt/tm/ltm/pool?$select=name,membersReference/link"
+      method: GET
+      user: "{{user}}"
+      password: "{{password}}"
+      validate_certs: no
+    delegate_to: localhost
+    loop: "{{ targetDevices | dict2items }}"
+    register: poolNamesLinks
+    tags:
+      - ucsPreRepave
+  
+  - name: Print pool names and links
+    debug:
+      msg: "{{poolNamesLinks}}"
+    tags:
+      - ucsPreRepave
+  
+  - name: Set Fact - create list of pool links
+    set_fact:
+      poolsLinks: "{{ poolNamesLinks| default({}) | json_query('results[].json.items[].membersReference.link') }}"
+    tags:
+      - ucsPreRepave
+  
+
+  - name: Print all pool links
+    debug:
+      msg: "{{poolsLinks}}"
+      verbosity: 1
+    tags:
+      - ucsPreRepave
+
+  - name: GET - list of pools and member links to create status pre-repave activities
+    uri:
+      url: "https://{{inventory_hostname}}{{item | urlsplit('path')}}?$select=name,state"
+      method: GET
+      user: "{{user}}"
+      password: "{{password}}"
+      validate_certs: no
+    delegate_to: localhost
+    loop: "{{ poolsLinks |list }}"
+    register: poolStatus
+    tags:
+      - ucsPreRepave
+ 
+  - name: Print poolStatus
+    debug:
+      msg: "{{poolStatus | json_query('results[].json.items[]')}}"
+    tags:
+      - ucsPreRepave
+
+  - name: Write poolStatus dictionary to a file for backup purposes
+    copy: 
+      content="poolStatus{{ ":" }} {{ poolStatus | json_query('results[].json.items[]') }}"
+      dest=../vars/prePoolStatus.json
+    delegate_to: localhost
+    tags:
+      - ucsPreRepave
 
 ######  BELOW IS TO DOWNLOAD RECENTLY CREATED UCS #####
 
@@ -189,11 +294,15 @@
       patterns: '{{nameOfDeployment}}.*'
       use_regex: yes
     register: findFiles
+    tags:
+      - ucsDownload
   
   - name: print findFiles
     debug:
       msg: "{{findFiles}}"
       verbosity: 1
+    tags:
+      - ucsDownload
 
   - name: Set Fact - file names to transfer to devices
     set_fact:
@@ -201,21 +310,29 @@
     vars:
       query_json: >
         files[].path
+    tags:
+      - ucsDownload
   
   - name: print findFiles
     debug:
       msg: "{{findFiles}}"
       verbosity: 1
+    tags:
+      - ucsDownload
 
   - name: Set Fact - filter path to get only the name of file
     set_fact:
       filesToTransfer: "{{ filesToTransfer + [item | basename] }}"
     with_items: "{{ findFiles }}"
+    tags:
+      - ucsDownload
   
   - name: Print filesToTransfer
     debug:
       msg: "{{filesToTransfer}}"
       verbosity: 1
+    tags:
+      - ucsDownload
   
   - name: Fetch - pull the ucs files that were just created from BIG-IQ to Ansible host
     fetch:
@@ -223,6 +340,8 @@
       dest: ../ucs/
       flat: yes
     with_items: "{{ filesToTransfer }}"
+    tags:
+      - ucsDownload
 
 
 ######  PAUSE TO ALLOW FOR RE-PAVE ACTIVITIES #####
@@ -230,11 +349,15 @@
   - name: Print msg about waiting for re-pave
     debug:
       msg: "The playbook will pause while a re-pave effort is completed. Please follow the PAUSE instructions. -tmsh load sys config default -Reboot -set Password"
+    tags:
+      - always
 
 
   - name: Pause for 14400 seconds (4 hours)
     pause:
       seconds: 14400
+    tags:
+      - always
 
 #####  BELOW IS TO UPLOAD and install UCS BIG-IPs #####
 
@@ -243,11 +366,14 @@
       hostname: "{{item.value.device}}"
       provider:
         server: "{{item.value.address}}"
+        server_port: "{{item.value.serverPort}}"
         user: "{{user}}"
         password: "{{password}}"
         validate_certs: no
     delegate_to: localhost
     loop: "{{ targetDevices | dict2items }}"
+    tags:
+      - ucsDeploy
 
   - name: Upload UCS
     bigip_ucs:
@@ -256,14 +382,56 @@
       passphrase: "{{password}}"
       provider:
         server: "{{item.value.address}}"
+        server_port: "{{item.value.serverPort}}"
         user: "{{user}}"
         password: "{{password}}"
         validate_certs: no
     delegate_to: localhost
     ignore_errors: True
     loop: "{{ targetDevices | dict2items }}"
+    tags:
+      - ucsDeploy
 
-  - name: Get status of devices in BIG-IQ, once device on BIG-IQ turn "green" it'll pass condition
+#####  BELOW IS TO CHECK FOR SUCCESSFUL INSTALL OF UCSs ON BIG-IPs #####
+
+  - name: Get current timestamp from the BIG-IQ system after UCS restore task
+    shell:
+      cmd: "date +%s%6N"
+      executable: /bin/bash
+    register: dayTimeUcsRestore
+    tags:
+      - postUcsUpload
+
+  - name: Get date from BIG-IQ to use for searching /var/log/ltm on BIG-IPs
+    shell:
+      cmd: "date \"+%b %e\""
+      executable: /bin/bash
+    register: monthDay
+    tags:
+      - postUcsUpload
+  
+  - name: Check /var/log/ltm for log message of UCS installation suceess on BIG-IPs
+    uri:
+      url: "https://{{inventory_hostname}}/mgmt/shared/resolver/device-groups/cm-bigip-allBigIpDevices/devices/{{item.value.machineId}}/rest-proxy/mgmt/tm/util/bash"
+      method: POST
+      status_code: 200
+      user: "{{user}}"
+      password: "{{password}}"
+      body:
+        command: "run"
+        utilCmdArgs: "-c \"grep 'UCS installation success' /var/log/ltm | grep '{{monthDay.stdout}}'\""
+      body_format: json
+      validate_certs: no
+    delegate_to: localhost
+    register: checkUcsSuccessLogs
+    loop: "{{ targetDevices | dict2items }}"
+    until: checkUcsSuccessLogs.json.commandResult is defined
+    retries: 45
+    delay: 10
+    tags:
+      - postUcsUpload
+
+  - name: Using timestamp after bigip_ucs module, check against last CPU state updated on BIG-IQ, if last check on BIG-IQ is greater than timestamp we know BIG-IQ is communicating with BIG-IP that has been UCS restored. 
     uri:
       url: "https://{{inventory_hostname}}/mgmt/shared/resolver/device-groups/cm-bigip-allBigIpDevices/devices/{{item.value.machineId}}/stats"
       method: GET
@@ -274,13 +442,76 @@
     delegate_to: localhost
     register: getStatusOnBigiq
     loop: "{{ targetDevices | dict2items }}"
-    until: getStatusOnBigiq['json']['entries']['health.summary']['value'] == 1.0
+    until: getStatusOnBigiq['json']['entries']['health.stats.cpu.0_0.usageRatio']['lastUpdateMicros']|int > dayTimeUcsRestore.stdout|int
     retries: 90
     delay: 20
+    tags:
+      - postUcsUpload
 
-  - name: debug
+######  BELOW IS TO GET A POOL STATUSES AFTER RE-PAVE ACTIVITY #####
+
+  # - name: GET - list of pools and member links to create status pre-repave activities
+  #   uri:
+  #     url: "https://{{inventory_hostname}}/mgmt/shared/resolver/device-groups/cm-bigip-allBigIpDevices/devices/{{item.value.machineId}}/rest-proxy/mgmt/tm/ltm/pool?$select=name,membersReference/link"
+  #     method: GET
+  #     user: "{{user}}"
+  #     password: "{{password}}"
+  #     validate_certs: no
+  #   delegate_to: localhost
+  #   loop: "{{ targetDevices | dict2items }}"
+  #   register: poolNamesLinks
+  #   tags:
+  #     - ucsPostRepave
+  
+  # - name: Print pool names and links
+  #   debug:
+  #     msg: "{{poolNamesLinks}}"
+  #   tags:
+  #     - ucsPostRepave
+  
+  # - name: Set Fact - create list of pool links
+  #   set_fact:
+  #     poolsLinks: "{{ poolNamesLinks| default({}) | json_query('results[].json.items[].membersReference.link') }}"
+  #   tags:
+  #     - ucsPostRepave
+  
+  # - name: Print all pool links
+  #   debug:
+  #     msg: "{{poolsLinks}}"
+  #     verbosity: 1
+  #   tags:
+  #     - ucsPostRepave
+
+  - name: GET - list of pools and member links to create status pre-repave activities
+    uri:
+      url: "https://{{inventory_hostname}}{{item | urlsplit('path')}}?$select=name,state"
+      method: GET
+      user: "{{user}}"
+      password: "{{password}}"
+      validate_certs: no
+    delegate_to: localhost
+    loop: "{{ poolsLinks |list }}"
+    register: poolStatus
+    tags:
+      - ucsPostRepave
+ 
+  - name: Print poolStatus
     debug:
-      msg: '{{getStatusOnBigiq | json_query(query_json)}}'
-    vars:
-      query_json: >
-        results[].json.entries."health.summary".value
+      msg: "{{poolStatus | json_query('results[].json.items[]')}}"
+    tags:
+      - ucsPostRepave
+
+  - name: Write poolStatus dictionary to a file for backup purposes
+    copy: 
+      content="poolStatus{{ ":" }} {{ poolStatus | json_query('results[].json.items[]') }}"
+      dest=../vars/postPoolStatus.json
+    delegate_to: localhost
+    tags:
+      - ucsPostRepave
+
+  - name: "Show the difference between files" 
+    local_action: shell sdiff ../vars/prePoolStatus.json ../vars/postPoolStatus.json
+    register: diff_output
+    failed_when: 'diff_output.rc > 0'
+    tags:
+      - last
