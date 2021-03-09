@@ -1,7 +1,6 @@
 ---
 - name: "Using BIG-IQ: Generate backup/ucs of group based on existing schedule; Deploy UCS to BIG-IPs"
   hosts: bigiq
-  #connection: local
   gather_facts: no
 
   collections:
@@ -9,7 +8,6 @@
 
   vars:
     user: admin
-    #password: <password>
     existingBackupName: ansibleBackup
     bigIPmgmtPort: 443
     backupDict: {}
@@ -29,6 +27,7 @@
   #     private: no
 
   tasks:
+
   - name: Get timestamp from the system
     shell:
       cmd: "date +%Y%m%d%H%M"
@@ -288,7 +287,7 @@
   - name: Write poolStatus dictionary to a file for backup purposes
     copy: 
       content="poolStatus{{ ":" }} {{ poolStatus | json_query('results[].json.items[]') }}"
-      dest=../vars/prePoolStatus.json
+      dest=../files/prePoolStatus.txt
     delegate_to: localhost
     tags:
       - ucsPreRepave
@@ -477,38 +476,6 @@
 
 ######  BELOW IS TO GET A POOL STATUSES AFTER RE-PAVE ACTIVITY #####
 
-  # - name: GET - list of pools and member links to create status pre-repave activities
-  #   uri:
-  #     url: "https://{{inventory_hostname}}/mgmt/shared/resolver/device-groups/cm-bigip-allBigIpDevices/devices/{{item.value.machineId}}/rest-proxy/mgmt/tm/ltm/pool?$select=name,membersReference/link"
-  #     method: GET
-  #     user: "{{user}}"
-  #     password: "{{password}}"
-  #     validate_certs: no
-  #   delegate_to: localhost
-  #   loop: "{{ targetDevices | dict2items }}"
-  #   register: poolNamesLinks
-  #   tags:
-  #     - ucsPostRepave
-  
-  # - name: Print pool names and links
-  #   debug:
-  #     msg: "{{poolNamesLinks}}"
-  #   tags:
-  #     - ucsPostRepave
-  
-  # - name: Set Fact - create list of pool links
-  #   set_fact:
-  #     poolsLinks: "{{ poolNamesLinks| default({}) | json_query('results[].json.items[].membersReference.link') }}"
-  #   tags:
-  #     - ucsPostRepave
-  
-  # - name: Print all pool links
-  #   debug:
-  #     msg: "{{poolsLinks}}"
-  #     verbosity: 1
-  #   tags:
-  #     - ucsPostRepave
-
   - name: GET - list of pools and member links to create status pre-repave activities
     uri:
       url: "https://{{inventory_hostname}}{{item | urlsplit('path')}}?$select=name,state"
@@ -531,14 +498,26 @@
   - name: Write poolStatus dictionary to a file for backup purposes
     copy: 
       content="poolStatus{{ ":" }} {{ poolStatus | json_query('results[].json.items[]') }}"
-      dest=../vars/postPoolStatus.json
+      dest=../files/postPoolStatus.txt
     delegate_to: localhost
     tags:
       - ucsPostRepave
 
-  - name: "Show the difference between files" 
-    local_action: shell sdiff ../vars/prePoolStatus.json ../vars/postPoolStatus.json
-    register: diff_output
-    failed_when: 'diff_output.rc > 0'
+#####  Checking pool statuses pre & post re-pave  ########
+
+  - name: "Check for pool diffs in pre & post re-pave status"
+    block:
+      - name: "Check if there are any differences between poolStatus files"
+        local_action: shell diff ../files/prePoolStatus.txt ../files/postPoolStatus.txt
+        register: diff_output
+        failed_when: 'diff_output.rc > 0'
+      #ignore_errors: yes
     tags:
-      - last
+          - last
+    rescue:
+      - name: Print when errors
+        debug:
+          msg: "The Diff failed, review the two files vars/prePoolStatus.txt & vars/postPoolStatus.txt"
+    tags:
+          - last
+      
