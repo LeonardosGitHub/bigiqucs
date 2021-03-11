@@ -8,7 +8,7 @@
 
   vars:
     user: admin
-    existingBackupName: ansibleBackup
+    existingBackupName: ansibleDeploy
     bigIPmgmtPort: 443
     backupDict: {}
     targetLinkDevices: {}
@@ -512,12 +512,12 @@
         register: diff_output
         failed_when: 'diff_output.rc > 0'
       #ignore_errors: yes
-    tags:
+        tags:
           - last
     rescue:
       - name: Print when errors
         debug:
           msg: "The Diff failed, review the two files vars/prePoolStatus.txt & vars/postPoolStatus.txt"
-    tags:
+        tags:
           - last
       
